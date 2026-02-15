@@ -13,15 +13,5 @@
           "use": "@vercel/static-build",
           "config": { "distDir": "dist" }
       }
-  ],
-   "routes": [
-      {
-          "src": "/api/(.*)",
-          "dest": "/api/index.py"
-      },
-      {
-          "src": "/(.*)",
-          "dest": "/frontend/$1"
-      }
   ]
 }
