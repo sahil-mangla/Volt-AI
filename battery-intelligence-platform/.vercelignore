@@ -1,0 +1,15 @@
+# Exclude heavy data folder to prevent 250MB limit error
+data/raw/
+data/processed/
+
+# Keep sample data
+!data/sample/
+
+# Standard Python ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/

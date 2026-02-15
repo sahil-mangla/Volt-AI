@@ -45,11 +45,17 @@ async def load_data():
     """
     global NASA_DATA, BATTERY_STATS
     try:
-        base_path = os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
-        # Check if running on Vercel (or other limited env)
+    # Check if running on Vercel (or other limited env)
         is_vercel = os.environ.get('VERCEL') == '1'
-        limit = 10 if is_vercel else 1000
         
+        if is_vercel:
+            base_path = os.path.join(os.path.dirname(__file__), '../../data/sample')
+            limit = 10
+            logger.info("Running on Vercel: Using sample dataset payload.")
+        else:
+            base_path = os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
+            limit = 1000
+            
         logger.info(f"Loading NASA Metadata from: {base_path} (Limit: {limit})")
         
         # Load up to limit files
