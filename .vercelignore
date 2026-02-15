@@ -1,0 +1,18 @@
+# Exclude large zip in root
+NASA Battery Dataset.zip
+
+# Exclude heavy data folder in subdirectory
+battery-intelligence-platform/data/raw/
+battery-intelligence-platform/data/processed/
+
+# Keep sample data
+!battery-intelligence-platform/data/sample/
+
+# Standard Ignores
+.git
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
