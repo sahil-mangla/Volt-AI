@@ -5,6 +5,7 @@ __pycache__/
 
 # Large files
 NASA Battery Dataset.zip
+battery-intelligence-platform/data/
 
 # Environment
 .env
