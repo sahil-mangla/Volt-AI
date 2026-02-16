@@ -47,19 +47,26 @@ async def load_data():
     try:
     # Check if running on Vercel (or other limited env)
         is_vercel = os.environ.get('VERCEL') == '1'
+        db_url = os.environ.get('DATABASE_URL')
         
-        if is_vercel:
-            base_path = os.path.join(os.path.dirname(__file__), '../../data/sample')
-            limit = 10
-            logger.info("Running on Vercel: Using sample dataset payload.")
-        else:
-            base_path = os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
-            limit = 1000
+        if db_url:
+            logger.info("DATABASE_URL found. Attempting to load from Database...")
+            NASA_DATA = DataLoader.load_from_db(db_url)
             
-        logger.info(f"Loading NASA Metadata from: {base_path} (Limit: {limit})")
-        
-        # Load up to limit files
-        NASA_DATA = DataLoader.load_nasa_dataset(base_path, max_files=limit)
+        # Fallback if DB load failed or not configured
+        if NASA_DATA is None:
+            if is_vercel:
+                base_path = os.path.join(os.path.dirname(__file__), '../../data/sample')
+                limit = 10
+                logger.info("Running on Vercel (No DB): Using sample dataset payload.")
+            else:
+                base_path = os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
+                limit = 1000
+                
+            logger.info(f"Loading NASA Metadata from: {base_path} (Limit: {limit})")
+            
+            # Load up to limit files
+            NASA_DATA = DataLoader.load_nasa_dataset(base_path, max_files=limit)
         
         if NASA_DATA is not None and not NASA_DATA.empty:
             logger.info(f"Loaded {len(NASA_DATA)} rows of cycle data.")

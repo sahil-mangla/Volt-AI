@@ -131,6 +131,29 @@ class DataLoader:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 
         return df
+        
+    @staticmethod
+    def load_from_db(connection_string: str) -> Optional[pd.DataFrame]:
+        """
+        Loads battery cycle data from the database.
+        """
+        try:
+            from sqlalchemy import create_engine
+            engine = create_engine(connection_string)
+            
+            query = "SELECT * FROM battery_cycles ORDER BY battery_id, cycle"
+            logger.info("Fetching data from database...")
+            
+            df = pd.read_sql(query, engine)
+            
+            if not df.empty:
+                logger.info(f"Successfully loaded {len(df)} rows from DB.")
+                return df
+                
+            return None
+        except Exception as e:
+            logger.error(f"Error loading from DB: {e}")
+            return None
 
     @staticmethod
     def create_synthetic_data(num_batteries=4, cycles_per_battery=100) -> pd.DataFrame:
