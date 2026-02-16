@@ -75,9 +75,19 @@ async def load_data():
             logger.info("Pre-computing fleet statistics...")
             df_features = FeatureEngineer.compute_cycle_features(NASA_DATA)
             
-            # Pre-compute LSTM predictions for fleet
-            logger.info("Running LSTM Inference on fleet...")
-            lstm_ruls = predictor.predict_batch(df_features)
+            # Load pre-computed LSTM predictions from database
+            logger.info("Loading pre-computed LSTM predictions from database...")
+            lstm_ruls = {}
+            try:
+                from sqlalchemy import create_engine
+                engine = create_engine(db_url)
+                with engine.connect() as conn:
+                    from sqlalchemy import text
+                    result = conn.execute(text("SELECT battery_id, rul_lstm FROM battery_predictions"))
+                    lstm_ruls = {row[0]: row[1] for row in result}
+                logger.info(f"Loaded LSTM predictions for {len(lstm_ruls)} batteries")
+            except Exception as e:
+                logger.warning(f"Could not load LSTM predictions from DB: {e}. Using linear regression only.")
             
             # Group by battery
             for bid in df_features['battery_id'].unique():
@@ -88,7 +98,7 @@ async def load_data():
                 
                 # RULs
                 rul_linear = int(latest.get('rul', 0))
-                rul_lstm = int(lstm_ruls.get(bid, rul_linear)) # Fallback to linear if no LSTM pred
+                rul_lstm = int(lstm_ruls.get(bid, rul_linear)) # Use pre-computed or fallback to linear
                 
                 # Determine status based on LINEAR (standard) or allow override?
                 # Let's stick to Health Score for status to be consistent.
