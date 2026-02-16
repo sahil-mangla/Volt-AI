@@ -1,15 +1,10 @@
-# Exclude heavy data folder to prevent 250MB limit error
-data/raw/
-data/processed/
-
-# Keep sample data
-!data/sample/
-
-# Standard Python ignores
-__pycache__/
+data/
+scripts/
+tests/
+*.md
+.env
+.git
 *.pyc
-*.pyo
-*.pyd
-.venv/
-env/
-venv/
+__pycache__/
+.pytest_cache/
+ml_engine/lstm_model.py
