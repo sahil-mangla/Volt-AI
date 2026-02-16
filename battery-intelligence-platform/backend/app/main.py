@@ -116,11 +116,11 @@ async def load_data():
 # In a real scenario, we might load a pre-trained pickle here
 predictor = BatteryPredictor()
 
-@app.get("/")
-async def root():
-    return {"message": "VoltAI API is running. use /docs for API documentation."}
+# Router for API endpoints
+from fastapi import APIRouter
+router = APIRouter()
 
-@app.get("/batteries")
+@router.get("/batteries")
 async def get_batteries(model_type: str = 'linear'):
     """Returns list of all monitored batteries and their current status."""
     if not BATTERY_STATS:
@@ -140,7 +140,7 @@ async def get_batteries(model_type: str = 'linear'):
         })
     return summary
 
-@app.get("/batteries/{battery_id}")
+@router.get("/batteries/{battery_id}")
 async def get_battery_details(battery_id: str, model_type: str = 'linear'):
     """Returns detailed history for a specific battery."""
     if battery_id not in BATTERY_STATS:
@@ -151,13 +151,9 @@ async def get_battery_details(battery_id: str, model_type: str = 'linear'):
     # Update the top-level RUL to match requested model
     data["rul"] = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
     
-    # Note: We are NOT updating the history array RULs because that would require 
-    # re-predicting history for every single point which is expensive.
-    # The graph usually plots 'health_score', so RUL history isn't critical visually.
-    
     return data
 
-@app.post("/predict", response_model=PredictionResponse)
+@router.post("/predict", response_model=PredictionResponse)
 async def predict_battery_health(data: CycleData):
     """
     Analyzes a single charge/discharge cycle and returns health metrics + RUL.
@@ -190,7 +186,10 @@ async def predict_battery_health(data: CycleData):
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     data_status = "loaded" if NASA_DATA is not None else "empty"
     return {"status": "healthy", "data": data_status, "batteries": list(BATTERY_STATS.keys())}
+
+# Mount the router with prefix
+app.include_router(router, prefix="/api")
