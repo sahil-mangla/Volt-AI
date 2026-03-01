@@ -370,9 +370,21 @@ function Dashboard() {
 
         {activeTab === 'data' && (
           <div className="bg-card border border-border rounded-xl p-6">
-            <h3 className="text-lg font-semibold mb-4">
-              Historical Cycle Records: <span className="text-primary">{selectedBattery || 'Select a Battery'}</span>
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <h3 className="text-lg font-semibold">
+                Historical Cycle Records
+              </h3>
+              <select
+                value={selectedBattery || ''}
+                onChange={(e) => setSelectedBattery(e.target.value)}
+                className="bg-background border border-border rounded-lg px-3 py-2 text-sm min-w-[180px]"
+              >
+                <option value="" disabled>Select a Battery</option>
+                {fleetData.map((b) => (
+                  <option key={b.id} value={b.id}>{b.id} — {b.health}% Health</option>
+                ))}
+              </select>
+            </div>
             
             {historyData.length > 0 ? (
               <div className="overflow-x-auto">
