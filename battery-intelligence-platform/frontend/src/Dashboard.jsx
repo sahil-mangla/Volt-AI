@@ -1,11 +1,13 @@
 
 
 import { useState, useEffect } from 'react'
-import { Activity, Battery, AlertTriangle, CheckCircle, BarChart3, Settings, Database } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle, BarChart3, Settings, Database } from 'lucide-react'
+import voltaiLogo from './assets/voltai-logo.svg'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   // Settings State with Persistence
   const [settings, setSettings] = useState(() => {
@@ -98,41 +100,75 @@ function Dashboard() {
     return fleetData.filter(b => b.status === 'CRITICAL').length;
   };
 
+  const handleNavClick = (tab) => {
+    setActiveTab(tab);
+    setSidebarOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
+
+      {/* Mobile overlay backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar / Navigation */}
-      <nav className="fixed top-0 left-0 h-full w-64 border-r border-border bg-card p-4">
+      <nav className={`fixed top-0 left-0 h-full w-64 border-r border-border bg-card p-4 z-40 transition-transform duration-300
+        ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } md:translate-x-0`}>
         <div className="flex items-center gap-2 mb-8">
-          <Battery className="h-8 w-8 text-primary" />
+          <img src={voltaiLogo} alt="VoltAI" className="h-8 w-8" />
           <h1 className="text-xl font-bold">VoltAI Platform</h1>
         </div>
         
         <div className="space-y-2">
-          <NavItem icon={<BarChart3 />} label="Overview" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} />
-          <NavItem icon={<Activity />} label="Live Telemetry" active={activeTab === 'telemetry'} onClick={() => setActiveTab('telemetry')} />
-          <NavItem icon={<Database />} label="Fleet Data" active={activeTab === 'data'} onClick={() => setActiveTab('data')} />
-          <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+          <NavItem icon={<BarChart3 />} label="Overview" active={activeTab === 'overview'} onClick={() => handleNavClick('overview')} />
+          <NavItem icon={<Activity />} label="Live Telemetry" active={activeTab === 'telemetry'} onClick={() => handleNavClick('telemetry')} />
+          <NavItem icon={<Database />} label="Fleet Data" active={activeTab === 'data'} onClick={() => handleNavClick('data')} />
+          <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => handleNavClick('settings')} />
         </div>
       </nav>
 
+      {/* Mobile Top Bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-card border-b border-border flex items-center px-4 gap-3 z-20">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="p-2 rounded-lg hover:bg-secondary transition-colors"
+          aria-label="Open menu"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <img src={voltaiLogo} alt="VoltAI" className="h-7 w-7" />
+        <span className="font-bold text-base">VoltAI Platform</span>
+      </div>
+
       {/* Main Content */}
-      <main className="ml-64 p-8">
-        <header className="mb-8 flex justify-between items-center">
-          <div>
-            <h2 className="text-3xl font-bold">
+      <main className="md:ml-64 pt-14 md:pt-0 p-4 md:p-8">
+        <header className="mb-6 md:mb-8">
+          <div className="mb-4">
+            <h2 className="text-2xl md:text-3xl font-bold">
               {activeTab === 'overview' && 'Fleet Dashboard'}
               {activeTab === 'telemetry' && 'Live Telemetry'}
               {activeTab === 'data' && 'Fleet Data Explorer'}
               {activeTab === 'settings' && 'System Settings'}
             </h2>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground text-sm md:text-base">
               {activeTab === 'overview' && `Real-time predictive intelligence for ${fleetData.length} active units.`}
               {activeTab === 'telemetry' && 'Monitoring real-time voltage, current, and temperature streams.'}
               {activeTab === 'data' && 'Deep dive into historical charge cycles and degradation patterns.'}
               {activeTab === 'settings' && 'Configure alert thresholds and model parameters.'}
             </p>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-3">
             <StatCard label="Avg Fleet Health" value={`${getAvgHealth()}%`} status={getAvgHealth() < settings.warningThreshold ? 'warning' : 'normal'} />
             <StatCard label="Predicted Failures" value={getCriticalCount()} status={getCriticalCount() > 0 ? 'critical' : 'normal'} />
           </div>
@@ -140,7 +176,7 @@ function Dashboard() {
 
         {/* Dynamic Content */}
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
             
             {/* Main Chart - Health Trend */}
             <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
@@ -153,7 +189,7 @@ function Dashboard() {
                     <LineChart data={historyData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                       <XAxis dataKey="cycle" stroke="#888" label={{ value: 'Cycle', position: 'insideBottom', offset: -5 }} />
-                      <YAxis stroke="#888" domain={[60, 100]} />
+                      <YAxis stroke="#888" domain={['auto', 'auto']} />
                       <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
                       <Legend />
                       <Line type="monotone" dataKey="health_score" stroke="#3b82f6" strokeWidth={2} name="Health Score (%)" dot={false} />
@@ -490,9 +526,9 @@ function NavItem({ icon, label, active, onClick }) {
 
 function StatCard({ label, value, status }) {
   return (
-    <div className="bg-card border border-border px-6 py-3 rounded-lg min-w-[150px]">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className={`text-2xl font-bold ${
+    <div className="bg-card border border-border px-4 md:px-6 py-3 rounded-lg flex-1 min-w-[130px]">
+      <p className="text-xs md:text-sm text-muted-foreground">{label}</p>
+      <p className={`text-xl md:text-2xl font-bold ${
         status === 'critical' ? 'text-destructive' : 
         status === 'warning' ? 'text-orange-500' : 'text-foreground'
       }`}>{value}</p>
