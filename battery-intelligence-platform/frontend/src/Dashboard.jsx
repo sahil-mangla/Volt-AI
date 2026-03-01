@@ -16,7 +16,7 @@ function Dashboard() {
       criticalThreshold: 70,
       warningThreshold: 80,
       refreshRate: '5 Seconds',
-      model: 'XGBoost (Production)'
+      model: 'Linear Regression (Production)'
     };
   });
 
@@ -494,7 +494,7 @@ function Dashboard() {
                      onChange={(e) => setSettings({...settings, model: e.target.value})}
                      className="bg-background border border-border rounded px-2 py-1 text-sm"
                   >
-                    <option>XGBoost (Production)</option>
+                    <option>Linear Regression (Production)</option>
                     <option>LSTM (Experimental)</option>
                     <option>Linear Regression (Baseline)</option>
                   </select>
