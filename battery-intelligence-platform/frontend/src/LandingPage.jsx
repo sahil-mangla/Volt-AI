@@ -1,12 +1,18 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Zap, Activity, TrendingUp, Shield, Brain, Wifi, Wrench, Smartphone } from 'lucide-react'
+import { Activity, TrendingUp, Shield } from 'lucide-react'
+import voltaiLogo from './assets/voltai-logo.svg'
 import './LandingPage.css'
 
 function LandingPage() {
   const navigate = useNavigate()
   const [exiting, setExiting] = useState(false)
   const sectionsRef = useRef([])
+
+  // Set browser tab title
+  useEffect(() => {
+    document.title = 'VoltAI'
+  }, [])
 
   // Scroll-triggered fade-in
   useEffect(() => {
@@ -40,7 +46,7 @@ function LandingPage() {
       {/* ===== NAVBAR ===== */}
       <nav className="flex items-center justify-between px-8 py-5 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
-          <Zap className="h-9 w-9 text-blue-500 logo-pulse" />
+          <img src={voltaiLogo} alt="VoltAI" className="h-9 w-9 logo-pulse" />
           <span className="text-2xl font-bold text-white tracking-tight">VoltAI</span>
         </div>
         <button

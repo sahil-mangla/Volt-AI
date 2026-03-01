@@ -41,6 +41,17 @@ function Dashboard() {
     }, 3000);
   };
 
+  // Update browser tab title when tab changes
+  useEffect(() => {
+    const titles = {
+      overview: 'Fleet Dashboard — VoltAI',
+      telemetry: 'Live Telemetry — VoltAI',
+      data: 'Fleet Data — VoltAI',
+      settings: 'Settings — VoltAI',
+    };
+    document.title = titles[activeTab] || 'VoltAI';
+  }, [activeTab]);
+
   // Fetch Fleet Summary & Apply Settings
   useEffect(() => {
     // Determine model query param based on settings
