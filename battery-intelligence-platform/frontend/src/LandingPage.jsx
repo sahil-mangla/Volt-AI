@@ -65,7 +65,7 @@ function LandingPage() {
           <h1 className="text-5xl md:text-7xl font-extrabold leading-tight mb-8 hero-gradient-text">
             Predictive Intelligence
             <br />
-            for Fleet Management
+            for EV Battery Ecosystems
           </h1>
           <p className="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-12 leading-relaxed">
             VoltAI harnesses the power of artificial intelligence to predict equipment failures,
