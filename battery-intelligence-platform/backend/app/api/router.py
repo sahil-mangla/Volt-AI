@@ -224,7 +224,7 @@ def process_all_files(db: Session = Depends(get_db)):
 @router.get("/batteries", response_model=List[BatterySummary])
 def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
     """ Returns paginated fleet summary mapped natively to BatterySummary calculations """
-    summaries = db.query(domain.BatterySummary).limit(limit).all()
+    summaries = db.query(domain.BatterySummary).order_by(domain.BatterySummary.last_updated.desc()).limit(limit).all()
     
     result = []
     for s in summaries:
