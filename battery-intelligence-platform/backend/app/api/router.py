@@ -151,6 +151,27 @@ def __process_blob_csv(filename: str, db: Session) -> int:
         db.add(prediction)
         records_inserted += 1
         
+    # Vectorially compute and update BatterySummary limits accurately
+    if not df.empty:
+        bat_id_summary = str(df.iloc[0].get("battery_id", f"BATT_{filename}"))
+        avg_health = float(df["health_score"].mean()) if "health_score" in df.columns else 100.0
+        max_cycles = int(df["cycle"].max()) if "cycle" in df.columns else len(df)
+        failure_risk = float(df["failure_risk"].mean()) if "failure_risk" in df.columns else 0.0
+
+        summary = db.query(domain.BatterySummary).filter(domain.BatterySummary.battery_id == bat_id_summary).first()
+        if summary:
+            summary.avg_health = avg_health
+            summary.max_cycles = max_cycles
+            summary.failure_risk = failure_risk
+        else:
+            summary = domain.BatterySummary(
+                battery_id=bat_id_summary,
+                avg_health=avg_health,
+                max_cycles=max_cycles,
+                failure_risk=failure_risk
+            )
+            db.add(summary)
+            
     db.commit()
     return records_inserted
 
@@ -201,44 +222,33 @@ def process_all_files(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/batteries", response_model=List[BatterySummary])
-def get_fleet_summary(db: Session = Depends(get_db)):
-    """ Returns summary for all batteries active in the system """
-    batteries = db.query(domain.Battery).all()
-    summary = []
-    for b in batteries:
-        # Find latest prediction
-        latest_pred = db.query(domain.Prediction).filter(domain.Prediction.battery_id == b.id).order_by(domain.Prediction.cycle.desc()).first()
-        health = latest_pred.health_score if latest_pred else 100.0
-        rul = latest_pred.rul_cycles if latest_pred else 1000.0
-        
-        summary.append({
-            "id": b.id,
-            "health": health,
-            "rul": rul,
-            "status": b.status,
-            "model_type": b.model_type
+def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
+    """ Returns paginated fleet summary mapped natively to BatterySummary calculations """
+    summaries = db.query(domain.BatterySummary).limit(limit).all()
+    
+    result = []
+    for s in summaries:
+        b = db.query(domain.Battery).filter(domain.Battery.id == s.battery_id).first()
+        result.append({
+            "id": s.battery_id,
+            "health": round(s.avg_health, 2),
+            "rul": max(0.0, float(1000 - s.max_cycles)),
+            "status": b.status if b else "HEALTHY",
+            "model_type": b.model_type if b else "Linear"
         })
-    return summary
+    return result
 
 @router.get("/fleet/summary")
 def get_fleet_statistics(db: Session = Depends(get_db)):
-    """ Calculates overall generic fleet summary statistics """
-    batteries = db.query(domain.Battery).all()
-    total_batteries = len(batteries)
+    """ Calculates overall generic fleet summary natively aggregated within the database dimension """
+    summaries = db.query(domain.BatterySummary).all()
+    total_batteries = len(summaries)
     
     if total_batteries == 0:
         return {"avg_health": 0, "predicted_failures": 0, "total_batteries": 0}
         
-    total_health = 0
-    predicted_failures = 0
-    
-    for b in batteries:
-        pred = db.query(domain.Prediction).filter(domain.Prediction.battery_id == b.id).order_by(domain.Prediction.cycle.desc()).first()
-        health = pred.health_score if pred else 100.0
-        
-        total_health += health
-        if health < 70:
-            predicted_failures += 1
+    total_health = sum(s.avg_health for s in summaries)
+    predicted_failures = sum(1 for s in summaries if s.avg_health < 70)
             
     avg_health = round(total_health / total_batteries)
     

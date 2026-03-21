@@ -61,3 +61,13 @@ class MaintenanceOrder(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     battery = relationship("Battery", back_populates="maintenance_orders")
+
+class BatterySummary(Base):
+    __tablename__ = "battery_summary"
+
+    battery_id = Column(String(50), ForeignKey("batteries.id"), primary_key=True, index=True)
+    avg_health = Column(Float, nullable=False)
+    max_cycles = Column(Integer, nullable=False)
+    failure_risk = Column(Float, default=0.0)
+    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
