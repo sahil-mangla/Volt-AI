@@ -1,44 +1,19 @@
-# Python
+.env
+.venv
+venv/
+env/
 pycache/
 *.pyc
-*.pyo
-*.pyd
 *.db
 *.sqlite3
-.env
-venv/
-.venv/
-
-# Node / Frontend
 node_modules/
-.next/
 dist/
 build/
-.vercel
-
-# Docker
-.docker/
-docker-compose.override.yml
-
-# Azure
-.azure/
-
-# Logs
-*.log
 webapp_logs/
-webapp_logs.zip
-
-# OS
+NASA Battery Dataset.zip
+battery-intelligence-platform/data/
 .DS_Store
 
-# Large files / datasets
-*.zip
-*.csv
-*.parquet
-*.h5
-*.pt
-*.pth
-battery-intelligence-platform/data/
-
-# ML models
-models/
+# Docker cache
+.docker/
+docker-compose.override.yml

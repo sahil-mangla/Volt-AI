@@ -1,65 +1,65 @@
 # Volt AI Battery Intelligence Platform
 
-The **Volt AI Battery Intelligence Platform** is a powerful cloud AI solution designed for predictive maintenance, condition monitoring, and health analysis of battery fleets. This platform processes complex cycle data to generate predictions like Remaining Useful Life (RUL) and State of Health (SOH).
+## Problem Statement
+Battery failure prediction and predictive maintenance are highly complex operations dependent on evaluating continuous streams of voltage, current, and temperature data over cycle intervals. Identifying capacity fade and predicting Remaining Useful Life (RUL) before unexpected cascading failures occur is essential for electric scaling and grid storage safety.
 
-## Architecture Overview
-The system relies on modern cloud technologies divided into logical tiers:
-- **Frontend** → Hosted on Vercel
-- **Backend** → Python FastAPI running on Azure App Service as a container
-- **Container Registry** → Azure Container Registry (ACR)
-- **Machine Learning Engine** → Python predictive models evaluating battery life arrays
+## Features
+- **Predictive Maintenance:** Calculates precise Remaining Useful Life (RUL).
+- **Condition Monitoring:** Real-time evaluation of health scores via cycle arrays.
+- **RESTful Endpoints:** Fully typed APIs for triggering AI heuristics.
+- **Scalable Architecture:** Designed explicitly for cloud-native deployment.
 
-## Project Directory Structure
-```
-Volt AI/
-    battery-intelligence-platform/
-        api/             # API routing (sometimes standalone or merged with backend core)
-        backend/         # FastAPI, DB schemas, Docker configurations
-        frontend/        # React/Next.js UI interfaces
-        ml_engine/       # Machine learning pipelines, dataset parsing logic
-        scripts/         # Auxiliary operational scripts
-        data/            # Ignored via VC, local datasets
-    .gitignore
-    README.md
-```
+## Tech Stack
+- **FastAPI** (Python backend core)
+- **Docker** (Containerization pipeline)
+- **Microsoft Azure App Service** (Cloud hosting)
+- **Azure Container Registry** (Image distribution)
+- **Azure SQL Database** (ODBC connected data lake)
+- **Vercel Frontend** (React user interfaces)
+- **Machine Learning** (Scikit-learn / LSTM predictive analytics)
 
-## How to Run Backend Locally
+## System Architecture
+The application is bifurcated internally where operations trigger horizontally scalable actions inside a Dockerized App Service boundary reporting centrally. (See `docs/architecture.md` for details).
+
+## Deployment Architecture
+Frontend (Vercel) → Backend Container via Azure Container Registry (ACR) deployed onto Azure App Service connecting privately to an Azure SQL Database.
+
+## API Endpoints
+The production API Base URL serves publicly from:
+**https://voltai-api-prod.azurewebsites.net**
+
+## Local Development Instructions
 1. Navigate to the `backend/` directory from the root.
-   ```bash
-   cd battery-intelligence-platform/backend
-   ```
-2. Ensure you have Python 3.10+ installed and install dependencies.
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the backend using the local startup script.
-   ```bash
-   ./startup.sh
-   # It is accessible across http://localhost:8000
-   ```
+```bash
+cd battery-intelligence-platform/backend
+```
+2. Create your `.env` and configure `DATABASE_URL` (SQLite will default).
+3. Install project dependencies.
+```bash
+pip install -r requirements.txt
+```
+4. Run the backend correctly with the startup script explicitly supporting auto table mapping configurations.
+```bash
+./startup.sh
+```
 
-## How to Build the Docker Image
-Inside the `battery-intelligence-platform/backend/` folder, run:
+## Docker Build Instructions
+You can rebuild the native Azure ODBC compatible Docker container locally:
 ```bash
 docker build -t voltai-backend .
-```
-You can test the container instance using:
-```bash
 docker run -p 8000:8000 voltai-backend
 ```
 
-## How to Deploy to Azure
-1. Authenticate with your Azure Container Registry:
-   ```bash
-   az acr login --name <your-acr-name>
-   ```
-2. Tag and push the local Docker image to ACR:
-   ```bash
-   docker tag voltai-backend:latest <your-acr-name>.azurecr.io/voltai-backend:latest
-   docker push <your-acr-name>.azurecr.io/voltai-backend:latest
-   ```
-3. Deploy onto Azure App Service linking the Web App to your Azure Container Registry repository via the Azure Portal or Azure CLI.
+## Azure Deployment Steps
+1. Authenticate with your Azure infrastructure using the Azure CLI (`az login`).
+2. Tag your local Docker image towards your specific Azure Container Registry explicitly.
+3. Push via `docker push <your-acr-name>.azurecr.io/voltai-backend`.
+4. Trigger a restart hook on your App Service to pull the latest changes seamlessly.
 
-## API Endpoint
-The production API Base URL serves from:
-**https://voltai-api-prod.azurewebsites.net**
+## Future Roadmap
+- integration with **Azure Blob Storage**.
+- Automated pipelines managed via **Azure Machine Learning**.
+- Time-series metric streaming to an **Event Hub Telemetry** ecosystem.
+- Dedicated unified **Fleet Monitoring Dashboard**.
+- Fully automated Push/SMS **Alert System**.
+- Live synchronization to a **Battery Digital Twin**.
