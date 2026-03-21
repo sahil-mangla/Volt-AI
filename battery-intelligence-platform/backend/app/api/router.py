@@ -247,7 +247,7 @@ def process_all_files(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/process-batch")
-def process_batch_files(batch_size: int = 100, db: Session = Depends(get_db)):
+def process_batch_files(batch_size: int = 50, db: Session = Depends(get_db)):
     """ Triggers a bulk array crawl processing a limited batch of valid CSV files sequentially resolving Azure Gateway timeouts """
     try:
         files = blob_service.list_files()
