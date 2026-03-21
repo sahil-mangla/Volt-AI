@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+gunicorn
+pandas
+numpy
+scikit-learn
+sqlalchemy
+psycopg2-binary
+python-dotenv
+pydantic
+pydantic-settings

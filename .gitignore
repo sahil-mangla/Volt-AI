@@ -1,20 +1,44 @@
 # Python
-__pycache__/
-*.py[cod]
-*$py.class
+pycache/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+.env
+venv/
+.venv/
 
-# Large files
-NASA Battery Dataset.zip
+# Node / Frontend
+node_modules/
+.next/
+dist/
+build/
+.vercel
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Azure
+.azure/
+
+# Logs
+*.log
+webapp_logs/
+webapp_logs.zip
+
+# OS
+.DS_Store
+
+# Large files / datasets
+*.zip
+*.csv
+*.parquet
+*.h5
+*.pt
+*.pth
 battery-intelligence-platform/data/
 
-# Environment
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Project specific
-.DS_Store
+# ML models
+models/
