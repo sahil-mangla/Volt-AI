@@ -10,3 +10,5 @@ python-dotenv
 pydantic
 pydantic-settings
 pyodbc
+azure-storage-blob
+python-multipart

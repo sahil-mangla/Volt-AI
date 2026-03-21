@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+import pandas as pd
+import io
+
+from app.services.blob_service import blob_service
 
 from app.database.session import get_db
 from app.models import domain
@@ -95,8 +99,70 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
 
 @router.post("/batteries")
 def upload_battery_data(file_context: dict, db: Session = Depends(get_db)):
-    """ Placeholder for CSV/JSON dataset bulk upload process """
+    """ Placeholder for manual JSON dataset bulk upload process """
     return {"status": "success", "message": "File processed (Mocked upload endpoint)"}
+
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """ Uploads a CSV stream securely to the Azure Blob Container natively """
+    try:
+        url = await blob_service.upload_file(file)
+        return {"filename": file.filename, "url": url}
+    except Exception as e:
+        log_error("Blob Upload", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/files")
+def list_files():
+    """ Returns index of telemetry datasets resting in the Blob container """
+    try:
+        return blob_service.list_files()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/process/{filename}")
+def process_file(filename: str, db: Session = Depends(get_db)):
+    """ Downloads CSV from Blob natively, executes Pandas extraction, commits via SQL """
+    try:
+        csv_bytes = blob_service.download_file_to_bytes(filename)
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+        
+        records_inserted = 0
+        
+        for _, row in df.iterrows():
+            bat_id = str(row.get("battery_id", f"BATT_{filename}"))
+            cycle = int(row.get("cycle", 1))
+            capacity = float(row.get("capacity", 2.0))
+            health_score = float(row.get("health_score", 100.0))
+            rul_cycles = float(row.get("rul_cycles", 1000.0))
+            
+            # Map physical database object constraints
+            battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
+            if not battery:
+                battery = domain.Battery(id=bat_id, capacity=capacity, status="HEALTHY")
+                db.add(battery)
+                db.commit()
+                
+            prediction = domain.Prediction(
+                battery_id=bat_id,
+                cycle=cycle,
+                health_score=health_score,
+                rul_cycles=rul_cycles,
+                failure_risk=0.0
+            )
+            db.add(prediction)
+            records_inserted += 1
+            
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": f"Successfully processed {filename}",
+            "records_inserted": records_inserted
+        }
+    except Exception as e:
+        log_error("Blob Processing", str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to process CSV: {e}")
 
 @router.get("/batteries", response_model=List[BatterySummary])
 def get_fleet_summary(db: Session = Depends(get_db)):
@@ -117,6 +183,34 @@ def get_fleet_summary(db: Session = Depends(get_db)):
             "model_type": b.model_type
         })
     return summary
+
+@router.get("/fleet/summary")
+def get_fleet_statistics(db: Session = Depends(get_db)):
+    """ Calculates overall generic fleet summary statistics """
+    batteries = db.query(domain.Battery).all()
+    total_batteries = len(batteries)
+    
+    if total_batteries == 0:
+        return {"avg_health": 0, "predicted_failures": 0, "total_batteries": 0}
+        
+    total_health = 0
+    predicted_failures = 0
+    
+    for b in batteries:
+        pred = db.query(domain.Prediction).filter(domain.Prediction.battery_id == b.id).order_by(domain.Prediction.cycle.desc()).first()
+        health = pred.health_score if pred else 100.0
+        
+        total_health += health
+        if health < 70:
+            predicted_failures += 1
+            
+    avg_health = round(total_health / total_batteries)
+    
+    return {
+        "avg_health": avg_health,
+        "predicted_failures": predicted_failures,
+        "total_batteries": total_batteries
+    }
 
 @router.get("/batteries/{id}")
 def get_battery_details(id: str, db: Session = Depends(get_db)):
