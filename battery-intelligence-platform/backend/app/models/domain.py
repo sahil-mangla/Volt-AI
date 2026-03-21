@@ -71,3 +71,9 @@ class BatterySummary(Base):
     failure_risk = Column(Float, default=0.0)
     last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+class ProcessedFile(Base):
+    __tablename__ = "processed_files"
+
+    filename = Column(String(255), primary_key=True, index=True)
+    processed_at = Column(DateTime(timezone=True), server_default=func.now())
+

@@ -246,6 +246,50 @@ def process_all_files(db: Session = Depends(get_db)):
         log_error("Bulk Process Master Thread", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/process-batch")
+def process_batch_files(batch_size: int = 100, db: Session = Depends(get_db)):
+    """ Triggers a bulk array crawl processing a limited batch of valid CSV files sequentially resolving Azure Gateway timeouts """
+    try:
+        files = blob_service.list_files()
+        
+        # Intercept and aggregate historically processed blobs efficiently via SQL set maps
+        processed_records = db.query(domain.ProcessedFile.filename).all()
+        processed_set = {r[0] for r in processed_records}
+        
+        unprocessed_files = [
+            f.get("name", "") for f in files 
+            if f.get("name", "").endswith(".csv") and f.get("name", "") not in processed_set
+        ]
+        
+        batch_files = unprocessed_files[:batch_size]
+        
+        files_processed = 0
+        total_records_inserted = 0
+        
+        for filename in batch_files:
+            try:
+                # Reuse underlying cleanly abstracted ML loops 
+                records = __process_blob_csv(filename, db)
+                total_records_inserted += records
+                files_processed += 1
+                
+                # Flag database array bounds
+                db.add(domain.ProcessedFile(filename=filename))
+                db.commit()
+            except Exception as file_err:
+                log_error(f"Batch Process Failed on {filename}", str(file_err))
+                db.rollback() 
+                
+        return {
+            "status": "success",
+            "files_processed": files_processed,
+            "records_inserted": total_records_inserted,
+            "remaining_files": len(unprocessed_files) - files_processed
+        }
+    except Exception as e:
+        log_error("Batch Process Master Thread", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/batteries", response_model=List[BatterySummary])
 def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
     """ Returns paginated fleet summary mapped natively to BatterySummary calculations """
