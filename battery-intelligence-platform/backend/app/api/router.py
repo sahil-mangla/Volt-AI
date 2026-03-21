@@ -120,41 +120,46 @@ def list_files():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def __process_blob_csv(filename: str, db: Session) -> int:
+    """ Core ingestion logic cleanly decoupled """
+    csv_bytes = blob_service.download_file_to_bytes(filename)
+    df = pd.read_csv(io.BytesIO(csv_bytes))
+    
+    records_inserted = 0
+    
+    for _, row in df.iterrows():
+        bat_id = str(row.get("battery_id", f"BATT_{filename}"))
+        cycle = int(row.get("cycle", 1))
+        capacity = float(row.get("capacity", 2.0))
+        health_score = float(row.get("health_score", 100.0))
+        rul_cycles = float(row.get("rul_cycles", 1000.0))
+        
+        # Map physical database object constraints
+        battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
+        if not battery:
+            battery = domain.Battery(id=bat_id, capacity=capacity, status="HEALTHY")
+            db.add(battery)
+            db.commit()
+            
+        prediction = domain.Prediction(
+            battery_id=bat_id,
+            cycle=cycle,
+            health_score=health_score,
+            rul_cycles=rul_cycles,
+            failure_risk=0.0
+        )
+        db.add(prediction)
+        records_inserted += 1
+        
+    db.commit()
+    return records_inserted
+
+
 @router.post("/process/{filename}")
 def process_file(filename: str, db: Session = Depends(get_db)):
-    """ Downloads CSV from Blob natively, executes Pandas extraction, commits via SQL """
+    """ Specific single-file processing via native HTTP trigger """
     try:
-        csv_bytes = blob_service.download_file_to_bytes(filename)
-        df = pd.read_csv(io.BytesIO(csv_bytes))
-        
-        records_inserted = 0
-        
-        for _, row in df.iterrows():
-            bat_id = str(row.get("battery_id", f"BATT_{filename}"))
-            cycle = int(row.get("cycle", 1))
-            capacity = float(row.get("capacity", 2.0))
-            health_score = float(row.get("health_score", 100.0))
-            rul_cycles = float(row.get("rul_cycles", 1000.0))
-            
-            # Map physical database object constraints
-            battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
-            if not battery:
-                battery = domain.Battery(id=bat_id, capacity=capacity, status="HEALTHY")
-                db.add(battery)
-                db.commit()
-                
-            prediction = domain.Prediction(
-                battery_id=bat_id,
-                cycle=cycle,
-                health_score=health_score,
-                rul_cycles=rul_cycles,
-                failure_risk=0.0
-            )
-            db.add(prediction)
-            records_inserted += 1
-            
-        db.commit()
-        
+        records_inserted = __process_blob_csv(filename, db)
         return {
             "status": "success",
             "message": f"Successfully processed {filename}",
@@ -163,6 +168,37 @@ def process_file(filename: str, db: Session = Depends(get_db)):
     except Exception as e:
         log_error("Blob Processing", str(e))
         raise HTTPException(status_code=500, detail=f"Failed to process CSV: {e}")
+
+@router.post("/process-all")
+def process_all_files(db: Session = Depends(get_db)):
+    """ Triggers a bulk array crawl processing all valid CSV files resting statically within Azure Blob Container """
+    try:
+        files = blob_service.list_files()
+        
+        files_processed = 0
+        total_records_inserted = 0
+        failed_files = []
+        
+        for f in files:
+            filename = f.get("name", "")
+            if filename.endswith(".csv"):
+                try:
+                    records = __process_blob_csv(filename, db)
+                    total_records_inserted += records
+                    files_processed += 1
+                except Exception as file_err:
+                    log_error(f"Bulk Process Failed on {filename}", str(file_err))
+                    failed_files.append(filename)
+                    
+        return {
+            "status": "success",
+            "files_processed": files_processed,
+            "records_inserted": total_records_inserted,
+            "failed_files": failed_files
+        }
+    except Exception as e:
+        log_error("Bulk Process Master Thread", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/batteries", response_model=List[BatterySummary])
 def get_fleet_summary(db: Session = Depends(get_db)):
