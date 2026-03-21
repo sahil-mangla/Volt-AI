@@ -93,12 +93,12 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
         log_error("Prediction Endpoint", str(e))
         raise HTTPException(status_code=500, detail="Prediction failed")
 
-@router.post("/battery/upload")
+@router.post("/batteries")
 def upload_battery_data(file_context: dict, db: Session = Depends(get_db)):
     """ Placeholder for CSV/JSON dataset bulk upload process """
     return {"status": "success", "message": "File processed (Mocked upload endpoint)"}
 
-@router.get("/fleet/summary", response_model=List[BatterySummary])
+@router.get("/batteries", response_model=List[BatterySummary])
 def get_fleet_summary(db: Session = Depends(get_db)):
     """ Returns summary for all batteries active in the system """
     batteries = db.query(domain.Battery).all()
@@ -118,7 +118,7 @@ def get_fleet_summary(db: Session = Depends(get_db)):
         })
     return summary
 
-@router.get("/battery/{id}")
+@router.get("/batteries/{id}")
 def get_battery_details(id: str, db: Session = Depends(get_db)):
     """ Detailed history of a specific battery id """
     battery = db.query(domain.Battery).filter(domain.Battery.id == id).first()
