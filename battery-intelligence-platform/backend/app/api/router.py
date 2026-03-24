@@ -426,25 +426,46 @@ def get_battery_details(id: str, db: Session = Depends(get_db)):
 
 @router.get("/alerts")
 def get_active_alerts(db: Session = Depends(get_db)):
-    """ List unresolved safety or maintenance alerts generated dynamically by ML thresholds """
+    """ Lists at-risk batteries based on their latest ML prediction """
+    from sqlalchemy import func
     
-    # Query natively against database scaling abstractions
-    at_risk = db.query(domain.BatterySummary).filter(
-        (domain.BatterySummary.avg_health < 70) | 
-        (domain.BatterySummary.failure_risk > 0.6)
-    ).all()
+    latest_ts_subq = (
+        db.query(
+            domain.BatteryPrediction.battery_id,
+            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+        )
+        .group_by(domain.BatteryPrediction.battery_id)
+        .subquery()
+    )
+
+    latest_preds = (
+        db.query(domain.BatteryPrediction)
+        .join(
+            latest_ts_subq,
+            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
+            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+        )
+        .filter(
+            (domain.BatteryPrediction.health_score < 70) |
+            (domain.BatteryPrediction.failure_probability > 0.6)
+        )
+        .all()
+    )
     
     results = []
-    for battery in at_risk:
-        status_string = "Critical" if battery.avg_health < 50 or battery.failure_risk > 0.8 else "Warning"
-        if battery.avg_health < 70 and battery.failure_risk > 0.6:
-            status_string = "Critical"
-            
+    for p in latest_preds:
+        if p.health_score < 50 or p.failure_probability > 0.8:
+            status_str = "Critical"
+        elif p.health_score < 70 or p.failure_probability > 0.6:
+            status_str = "Warning"
+        else:
+            status_str = "Warning"
+
         results.append({
-            "battery_id": battery.battery_id,
-            "health": round(battery.avg_health, 1),
-            "failure_risk": round(battery.failure_risk, 2),
-            "status": status_string
+            "battery_id": p.battery_id,
+            "health": round(p.health_score, 1),
+            "failure_risk": round(p.failure_probability, 2),
+            "status": status_str
         })
         
     return results
@@ -512,11 +533,31 @@ def get_battery_predictions(battery_id: str, db: Session = Depends(get_db)):
 
 @router.get("/analytics/health-distribution")
 def get_health_distribution(db: Session = Depends(get_db)):
-    """ Groups active batteries into health distribution buckets """
-    summaries = db.query(domain.BatterySummary).all()
+    """ Groups batteries into health buckets based on their latest prediction """
+    from sqlalchemy import func
+    
+    latest_ts_subq = (
+        db.query(
+            domain.BatteryPrediction.battery_id,
+            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+        )
+        .group_by(domain.BatteryPrediction.battery_id)
+        .subquery()
+    )
+    
+    latest_preds = (
+        db.query(domain.BatteryPrediction)
+        .join(
+            latest_ts_subq,
+            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
+            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+        )
+        .all()
+    )
+    
     bins = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
-    for s in summaries:
-        h = s.avg_health
+    for p in latest_preds:
+        h = p.health_score
         if h <= 20: bins["0-20"] += 1
         elif h <= 40: bins["21-40"] += 1
         elif h <= 60: bins["41-60"] += 1
@@ -526,12 +567,32 @@ def get_health_distribution(db: Session = Depends(get_db)):
 
 @router.get("/analytics/failure-risk")
 def get_failure_risk(db: Session = Depends(get_db)):
-    """ Computes aggregate failure risk metrics """
-    summaries = db.query(domain.BatterySummary).all()
-    total = len(summaries)
+    """ Computes aggregate failure risk using the latest prediction per battery """
+    from sqlalchemy import func
+    
+    latest_ts_subq = (
+        db.query(
+            domain.BatteryPrediction.battery_id,
+            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+        )
+        .group_by(domain.BatteryPrediction.battery_id)
+        .subquery()
+    )
+    
+    latest_preds = (
+        db.query(domain.BatteryPrediction)
+        .join(
+            latest_ts_subq,
+            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
+            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+        )
+        .all()
+    )
+    
+    total = len(latest_preds)
     if total == 0: return {"average_risk": 0.0, "high_risk_count": 0}
-    high_risk = sum(1 for s in summaries if s.failure_risk > 0.8)
-    avg_risk = sum(s.failure_risk for s in summaries) / total
+    high_risk = sum(1 for p in latest_preds if p.failure_probability > 0.8)
+    avg_risk = sum(p.failure_probability for p in latest_preds) / total
     return {"average_risk": round(avg_risk, 2), "high_risk_count": high_risk}
 
 @router.post("/recompute-ml")
