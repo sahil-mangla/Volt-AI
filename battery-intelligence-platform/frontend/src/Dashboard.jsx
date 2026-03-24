@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Activity, AlertTriangle, CheckCircle, BarChart3, Settings, Database } from 'lucide-react'
 import voltaiLogo from './assets/voltai-logo.svg'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -23,6 +23,11 @@ function Dashboard() {
   const [fleetData, setFleetData] = useState([]);
   const [selectedBattery, setSelectedBattery] = useState(null);
   const [historyData, setHistoryData] = useState([]);
+  const [predictionsData, setPredictionsData] = useState([]);
+  const [healthDistribution, setHealthDistribution] = useState({});
+  const [failureRisk, setFailureRisk] = useState({ average_risk: 0, high_risk_count: 0 });
+  const [alertsData, setAlertsData] = useState([]);
+  const [availableModels, setAvailableModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [notification, setNotification] = useState({ visible: false, message: '', type: '' });
@@ -54,53 +59,58 @@ function Dashboard() {
 
   // Fetch Fleet Summary & Apply Settings
   useEffect(() => {
-    // Determine model query param based on settings
     const baseUrl = import.meta.env.VITE_API_URL || '/api';
-    const modelParam = settings.model.includes('LSTM') ? 'lstm' : 'linear';
     
-    fetch(`${baseUrl}/batteries?model_type=${modelParam}`)
+    fetch(`${baseUrl}/batteries`)
       .then(res => res.json())
       .then(data => {
-        // Apply dynamic thresholds
         const processedData = data.map(b => {
-          let status = 'HEALTHY';
-          // Keep existing status logic or backend logic
+          let status = b.status || 'HEALTHY';
           if (b.health < settings.criticalThreshold) status = 'CRITICAL';
           else if (b.health < settings.warningThreshold) status = 'WARNING';
-          
-          // If maintenance, keep it (unless we want to overwrite it with health status)
-          // For now, let's respect the local override if we had one, but effectively we are overwriting 
-          // fleetData every time. 
-          // Ideally we should merge with existing state to preserve "MAINTENANCE" status if it's local only.
-          // But for this prototype, simple refresh is fine.
-          
           return { ...b, status };
         });
 
         setFleetData(processedData);
-        if (processedData.length > 0 && !selectedBattery) {
-          setSelectedBattery(processedData[0].id); 
-        }
+        if (processedData.length > 0 && !selectedBattery) setSelectedBattery(processedData[0].id); 
         setLoading(false);
       })
       .catch(err => console.error("Failed to fetch fleet data:", err));
-  }, [settings]); // Re-run when settings change
+
+    fetch(`${baseUrl}/analytics/health-distribution`).then(res => res.json()).then(setHealthDistribution).catch(console.error);
+    fetch(`${baseUrl}/analytics/failure-risk`).then(res => res.json()).then(setFailureRisk).catch(console.error);
+    fetch(`${baseUrl}/alerts`).then(res => res.json()).then(setAlertsData).catch(console.error);
+    fetch(`${baseUrl}/models`).then(res => res.json()).then(data => setAvailableModels(data.models || [])).catch(console.error);
+  }, [settings.model, settings.criticalThreshold, settings.warningThreshold]); 
 
   // Fetch History for Selected Battery
   useEffect(() => {
     if (selectedBattery) {
-      const modelParam = settings.model.includes('LSTM') ? 'lstm' : 'linear';
       const baseUrl = import.meta.env.VITE_API_URL || '/api';
-    fetch(`${baseUrl}/batteries/${selectedBattery}?model_type=${modelParam}`)
+      fetch(`${baseUrl}/batteries/${selectedBattery}`)
         .then(res => res.json())
         .then(data => {
-          if (data && data.history) {
-            setHistoryData(data.history);
-          }
+          if (data && data.history) setHistoryData(data.history);
         })
         .catch(err => console.error("Failed to fetch history:", err));
+        
+      fetch(`${baseUrl}/predictions/${selectedBattery}`)
+        .then(res => res.json())
+        .then(data => setPredictionsData(data))
+        .catch(console.error);
     }
   }, [selectedBattery, settings.model]);
+
+  const handleModelChange = (e) => {
+    const newModel = e.target.value;
+    setSettings({...settings, model: newModel});
+    const baseUrl = import.meta.env.VITE_API_URL || '/api';
+    fetch(`${baseUrl}/model/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_name: newModel })
+    }).catch(err => console.error("Failed to update model:", err));
+  };
 
   const getAvgHealth = () => {
     if (!fleetData.length) return 0;
@@ -108,8 +118,18 @@ function Dashboard() {
   };
 
   const getCriticalCount = () => {
-    return fleetData.filter(b => b.status === 'CRITICAL').length;
+    return alertsData.filter(a => a.status === 'Critical').length || fleetData.filter(b => b.status === 'CRITICAL').length;
   };
+
+  const distData = Object.keys(healthDistribution).map(key => ({
+    name: key,
+    count: healthDistribution[key]
+  }));
+  
+  const riskData = [
+    { name: 'High Risk', value: failureRisk.high_risk_count, color: '#ef4444' },
+    { name: 'Safe', value: Math.max(0, fleetData.length - failureRisk.high_risk_count), color: '#22c55e' }
+  ];
 
   const handleNavClick = (tab) => {
     setActiveTab(tab);
@@ -215,31 +235,90 @@ function Dashboard() {
               </div>
             </div>
 
-            {/* Fleet Status List */}
+            {/* New Analytics Charts Section */}
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mt-4">
+              {/* Health Distribution */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <h3 className="text-lg font-semibold mb-4">Health Distribution</h3>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={distData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                      <XAxis dataKey="name" stroke="#888" />
+                      <YAxis stroke="#888" allowDecimals={false} />
+                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} cursor={{fill: '#334155', opacity: 0.4}} />
+                      <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Batteries" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Failure Risk */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <h3 className="text-lg font-semibold mb-4">Failure Risk Overview</h3>
+                <div className="flex flex-col items-center justify-center h-[250px]">
+                  <ResponsiveContainer width="100%" height="70%">
+                    <PieChart>
+                      <Pie
+                        data={riskData}
+                        cx="50%"
+                        cy="100%"
+                        startAngle={180}
+                        endAngle={0}
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {riskData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
+                      <Legend verticalAlign="top"/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="text-center mt-2">
+                    <p className="text-3xl font-bold text-foreground">{(failureRisk.average_risk * 100).toFixed(1)}%</p>
+                    <p className="text-sm text-muted-foreground">Avg Failure Probability</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Active Alerts List */}
             <div className="bg-card border border-border rounded-xl p-6 overflow-y-auto max-h-[400px]">
-              <h3 className="text-lg font-semibold mb-4">Fleet Status</h3>
+              <h3 className="text-lg font-semibold mb-4 flex items-center justify-between">
+                Active Alerts
+                <span className="bg-destructive/20 text-destructive text-xs px-2 py-1 rounded-full">{alertsData.length}</span>
+              </h3>
               <div className="space-y-4">
-                {fleetData.map((battery) => (
+                {alertsData.length > 0 ? alertsData.map((alert, idx) => (
                   <div 
-                    key={battery.id} 
-                    onClick={() => setSelectedBattery(battery.id)}
-                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedBattery === battery.id ? 'bg-primary/20 border border-primary/50' : 'bg-secondary/50 hover:bg-secondary'
-                    }`}
+                    key={idx}
+                    onClick={() => { setSelectedBattery(alert.battery_id); setActiveTab('data'); }}
+                    className="flex flex-col p-3 rounded-lg cursor-pointer transition-colors bg-secondary/50 hover:bg-secondary border-l-4 border-destructive"
                   >
-                    <div className="flex items-center gap-3">
-                      <StatusIcon status={battery.status} />
-                      <div>
-                        <p className="font-medium">{battery.id}</p>
-                        <p className="text-xs text-muted-foreground">RUL: {battery.rul} cycles</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={`h-4 w-4 ${alert.status === 'Critical' ? 'text-destructive' : 'text-orange-500'}`} />
+                        <span className="font-bold">{alert.battery_id}</span>
                       </div>
+                      <span className={`text-xs font-bold px-2 py-1 rounded ${alert.status === 'Critical' ? 'bg-destructive/20 text-destructive' : 'bg-orange-500/20 text-orange-500'}`}>
+                        {alert.status}
+                      </span>
                     </div>
-                    <div className="text-right">
-                      <p className={`font-bold ${getStatusColor(battery.status)}`}>{battery.health}%</p>
-                      <p className="text-xs text-muted-foreground">Health</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                      <div>Health: <span className="text-foreground font-medium">{alert.health}%</span></div>
+                      <div>Fail Risk: <span className="text-foreground font-medium">{(alert.failure_risk * 100).toFixed(1)}%</span></div>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50 text-green-500" />
+                    <p>No active alerts</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -385,6 +464,31 @@ function Dashboard() {
                 ))}
               </select>
             </div>
+
+            {predictionsData.length > 0 && (
+              <div className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-3 bg-secondary/20 p-4 rounded-xl border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">ML Engine</p>
+                  <p className="font-semibold text-primary">{predictionsData[0].model_name || 'Linear Regression'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Health Score</p>
+                  <p className={`font-bold ${predictionsData[0].health_score < settings.criticalThreshold ? 'text-destructive' : 'text-green-500'}`}>{predictionsData[0].health_score}%</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Failure Probability</p>
+                  <p className={`font-bold ${predictionsData[0].failure_probability > 0.8 ? 'text-destructive' : 'text-foreground'}`}>{(predictionsData[0].failure_probability * 100).toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Remaining Cycles</p>
+                  <p className="font-semibold">{Math.round(predictionsData[0].remaining_cycles)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Remaining Days</p>
+                  <p className="font-semibold">{Math.round(predictionsData[0].remaining_days || 0)}</p>
+                </div>
+              </div>
+            )}
             
             {historyData.length > 0 ? (
               <div className="overflow-x-auto">
@@ -503,12 +607,18 @@ function Dashboard() {
                   </div>
                   <select 
                      value={settings.model}
-                     onChange={(e) => setSettings({...settings, model: e.target.value})}
+                     onChange={handleModelChange}
                      className="bg-background border border-border rounded px-2 py-1 text-sm"
                   >
-                    <option>Linear Regression (Production)</option>
-                    <option>LSTM (Experimental)</option>
-                    <option>Linear Regression (Baseline)</option>
+                    {availableModels.length > 0 ? availableModels.map(m => (
+                      <option key={m} value={m}>{m.replace('_', ' ').toUpperCase()}</option>
+                    )) : (
+                      <>
+                        <option value="linear_regression_model">Linear Regression</option>
+                        <option value="lstm_model">LSTM (Experimental)</option>
+                        <option value="physics_model">Physics Baseline</option>
+                      </>
+                    )}
                   </select>
                 </div>
 

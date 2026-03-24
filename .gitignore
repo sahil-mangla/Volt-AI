@@ -1,19 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .env
 .venv
 venv/
 env/
-pycache/
-*.pyc
+ENV/
+env.bak/
+venv.bak/
+
+# Databases
 *.db
 *.sqlite3
+
+# Logs
+webapp_logs/
+*.log
+
+# Data / Large files
+NASA Battery Dataset.zip
+battery-intelligence-platform/data/
+
+# Node / Frontend
 node_modules/
 dist/
 build/
-webapp_logs/
-NASA Battery Dataset.zip
-battery-intelligence-platform/data/
-.DS_Store
 
-# Docker cache
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
 .docker/
 docker-compose.override.yml
+
+# Azure
+.azure/
+
+# IDE
+.vscode/
+.idea/
+
+# Mac
+*.swp
+*.swo
