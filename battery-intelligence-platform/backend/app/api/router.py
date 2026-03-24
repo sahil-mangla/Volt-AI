@@ -364,17 +364,37 @@ def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
 
 @router.get("/fleet/summary")
 def get_fleet_statistics(db: Session = Depends(get_db)):
-    """ Calculates overall generic fleet summary natively aggregated within the database dimension """
-    summaries = db.query(domain.BatterySummary).all()
-    total_batteries = len(summaries)
+    """ Calculates fleet summary dynamically from the latest ML prediction per battery """
+    from sqlalchemy import func
+    
+    # Subquery: latest cycle per battery_id in battery_predictions
+    latest_cycle_subq = (
+        db.query(
+            domain.BatteryPrediction.battery_id,
+            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+        )
+        .group_by(domain.BatteryPrediction.battery_id)
+        .subquery()
+    )
+    
+    # Get the actual latest prediction rows
+    latest_preds = (
+        db.query(domain.BatteryPrediction)
+        .join(
+            latest_cycle_subq,
+            (domain.BatteryPrediction.battery_id == latest_cycle_subq.c.battery_id) &
+            (domain.BatteryPrediction.created_at == latest_cycle_subq.c.latest_ts)
+        )
+        .all()
+    )
+    
+    total_batteries = len(latest_preds)
     
     if total_batteries == 0:
         return {"avg_health": 0, "predicted_failures": 0, "total_batteries": 0}
-        
-    total_health = sum(s.avg_health for s in summaries)
-    predicted_failures = sum(1 for s in summaries if s.avg_health < 70)
-            
-    avg_health = round(total_health / total_batteries)
+    
+    avg_health = round(sum(p.health_score for p in latest_preds) / total_batteries, 1)
+    predicted_failures = sum(1 for p in latest_preds if p.failure_probability > 0.7)
     
     return {
         "avg_health": avg_health,
