@@ -9,8 +9,9 @@ from app.services.blob_service import blob_service
 
 from app.database.session import get_db
 from app.models import domain
-from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, AlertResponse, MaintenanceRequest, MaintenanceResponse
-from app.ml.ml_service import ml_service
+from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, AlertResponse, MaintenanceRequest, MaintenanceResponse, ModelSelectRequest
+from app.features.extractor import extract_features
+from app.ml_engine.engine import model_engine
 from app.utils.logger import log_prediction, log_alert, log_maintenance, log_error
 
 router = APIRouter()
@@ -22,6 +23,10 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
     Saves the prediction to the database.
     """
     try:
+        # Get selected model
+        setting = db.query(domain.ModelSetting).first()
+        selected_model = setting.selected_model if setting else "physics_model"
+
         # 1. Feature Engineering
         cycle_dict = {
             "time": data.time,
@@ -29,20 +34,20 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
             "current": data.current,
             "temperature": data.temperature
         }
-        features = ml_service.perform_feature_engineering(cycle_dict)
+        features = extract_features(cycle_dict, data.cycle_id)
         
         # 2. ML Prediction
-        results = ml_service.predict_health_and_rul(features)
+        results = model_engine.predict(features, selected_model)
         
         status_str = "HEALTHY"
         is_critical = False
         recommendation = "Normal operation."
         
-        if results["health_score"] < 70 or results["rul_cycles"] < 20:
+        if results["health_score"] < 70 or results["failure_probability"] > 0.8:
             status_str = "CRITICAL"
             is_critical = True
             recommendation = "Schedule immediate replacement."
-        elif results["health_score"] < 85 or results["rul_cycles"] < 50:
+        elif results["health_score"] < 85 or results["failure_probability"] > 0.4:
             status_str = "WARNING"
             recommendation = "Plan maintenance check within 30 days."
 
@@ -54,13 +59,36 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
             db.add(battery)
             db.commit()
 
-        # Save Prediction
-        prediction_db = domain.Prediction(
+        # Save feature to BatteryFeature
+        bat_feature = domain.BatteryFeature(
             battery_id=data.battery_id,
             cycle=data.cycle_id,
+            cycle_count=features.get("cycle_count"),
+            average_voltage=features.get("average_voltage"),
+            max_voltage=features.get("max_voltage"),
+            min_voltage=features.get("min_voltage"),
+            average_current=features.get("average_current"),
+            average_temperature=features.get("average_temperature"),
+            capacity_fade=features.get("capacity_fade"),
+            internal_resistance=features.get("internal_resistance"),
+            charge_time=features.get("charge_time"),
+            discharge_time=features.get("discharge_time"),
+            energy_efficiency=features.get("energy_efficiency"),
+            voltage_variance=features.get("voltage_variance"),
+            temperature_variance=features.get("temperature_variance"),
+            current_variance=features.get("current_variance")
+        )
+        db.add(bat_feature)
+
+        # Save Prediction
+        prediction_db = domain.BatteryPrediction(
+            battery_id=data.battery_id,
+            cycle=data.cycle_id,
+            model_name=selected_model,
             health_score=results["health_score"],
-            rul_cycles=results["rul_cycles"],
-            failure_risk=results["failure_risk"]
+            remaining_cycles=results["remaining_cycles"],
+            remaining_days=results["remaining_days"],
+            failure_probability=results["failure_probability"]
         )
         db.add(prediction_db)
         
@@ -72,7 +100,7 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
             alert = domain.Alert(
                 battery_id=data.battery_id,
                 severity=status_str,
-                message=f"Critical health drop detected during cycle {data.cycle_id}."
+                message=f"Critical health drop detected by {selected_model} during cycle {data.cycle_id}."
             )
             db.add(alert)
             log_alert(data.battery_id, status_str, alert.message)
@@ -80,14 +108,14 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
         db.commit()
         
         # Logging
-        log_prediction(data.battery_id, data.cycle_id, results["health_score"], results["rul_cycles"], results["failure_risk"])
+        log_prediction(data.battery_id, data.cycle_id, results["health_score"], results["remaining_cycles"], results["failure_probability"])
 
         return {
             "battery_id": data.battery_id,
             "cycle": data.cycle_id,
             "health_score": results["health_score"],
-            "rul_cycles": results["rul_cycles"],
-            "failure_risk": results["failure_risk"],
+            "rul_cycles": results["remaining_cycles"],
+            "failure_risk": results["failure_probability"],
             "status": status_str,
             "is_critical": is_critical,
             "recommendation": recommendation
@@ -121,18 +149,21 @@ def list_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 def __process_blob_csv(filename: str, db: Session) -> int:
-    """ Core ingestion logic cleanly decoupled """
+    """ Core ingestion logic cleanly decoupled using new ML pipeline """
+    from sqlalchemy import func
     csv_bytes = blob_service.download_file_to_bytes(filename)
     df = pd.read_csv(io.BytesIO(csv_bytes))
     
     records_inserted = 0
     
+    # Get selected model
+    setting = db.query(domain.ModelSetting).first()
+    selected_model = setting.selected_model if setting else "physics_model"
+
     for _, row in df.iterrows():
         bat_id = str(row.get("battery_id", f"BATT_{filename}"))
         cycle = int(row.get("cycle", 1))
         capacity = float(row.get("capacity", 2.0))
-        health_score = float(row.get("health_score", 100.0))
-        rul_cycles = float(row.get("rul_cycles", 1000.0))
         
         # Map physical database object constraints
         battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
@@ -141,53 +172,77 @@ def __process_blob_csv(filename: str, db: Session) -> int:
             db.add(battery)
             db.commit()
             
-        prediction = domain.Prediction(
+        # Feature Extraction
+        cycle_dict = {
+            "time": [0.0, 3600.0],
+            "voltage": [float(row.get("voltage", 3.7)), float(row.get("voltage", 3.7))],
+            "current": [float(row.get("current", 1.5)), float(row.get("current", -1.5))],
+            "temperature": [float(row.get("temperature", 25.0)), float(row.get("temperature", 25.0))]
+        }
+        features = extract_features(cycle_dict, cycle)
+        
+        bat_feat = domain.BatteryFeature(
             battery_id=bat_id,
             cycle=cycle,
-            health_score=health_score,
-            rul_cycles=rul_cycles,
-            failure_risk=0.0
+            cycle_count=features.get("cycle_count"),
+            average_voltage=features.get("average_voltage"),
+            max_voltage=features.get("max_voltage"),
+            min_voltage=features.get("min_voltage"),
+            average_current=features.get("average_current"),
+            average_temperature=features.get("average_temperature"),
+            capacity_fade=features.get("capacity_fade"),
+            internal_resistance=features.get("internal_resistance"),
+            charge_time=features.get("charge_time"),
+            discharge_time=features.get("discharge_time"),
+            energy_efficiency=features.get("energy_efficiency"),
+            voltage_variance=features.get("voltage_variance"),
+            temperature_variance=features.get("temperature_variance"),
+            current_variance=features.get("current_variance")
         )
-        db.add(prediction)
+        db.add(bat_feat)
+
+        # ML Prediction
+        results = model_engine.predict(features, selected_model)
+
+        prediction_db = domain.BatteryPrediction(
+            battery_id=bat_id,
+            cycle=cycle,
+            model_name=selected_model,
+            health_score=results["health_score"],
+            remaining_cycles=results["remaining_cycles"],
+            remaining_days=results["remaining_days"],
+            failure_probability=results["failure_probability"]
+        )
+        db.add(prediction_db)
+
+        # Alerting
+        if results["failure_probability"] > 0.8:
+            alert = domain.Alert(
+                battery_id=bat_id,
+                severity="CRITICAL",
+                message=f"Critical failure probability detected by {selected_model} during cycle {cycle}."
+            )
+            db.add(alert)
+            battery.status = "CRITICAL"
+            
         records_inserted += 1
         
     # Vectorially compute and update BatterySummary limits accurately
     if not df.empty:
         bat_id_summary = str(df.iloc[0].get("battery_id", f"BATT_{filename}"))
         
-        # ML Inference Integration: calculate latest risk bounds securely if sensor telemetry exists natively
-        avg_health = float(df["health_score"].mean()) if "health_score" in df.columns else 100.0
-        max_cycles = int(df["cycle"].max()) if "cycle" in df.columns else len(df)
-        failure_risk = float(df["failure_risk"].mean()) if "failure_risk" in df.columns else 0.0
-        remaining_cycles = (1000 - max_cycles) if max_cycles < 1000 else 0
+        recent_preds = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == bat_id_summary).order_by(domain.BatteryPrediction.cycle.desc()).limit(1).first()
         
-        if "voltage" in df.columns and "current" in df.columns and "temperature" in df.columns:
-            try:
-                # Use absolute peak row telemetry for boundary evaluation
-                last_row = df.iloc[-1]
-                cycle_dict = {
-                    "time": 0.0,
-                    "voltage": float(last_row.get("voltage", 3.7)),
-                    "current": float(last_row.get("current", 1.5)),
-                    "temperature": float(last_row.get("temperature", 25.0))
-                }
-                features = ml_service.perform_feature_engineering(cycle_dict)
-                results = ml_service.predict_health_and_rul(features)
-                
-                avg_health = float(results["health_score"])
-                failure_risk = float(results["failure_risk"])
-                remaining_cycles = float(results["rul_cycles"])
-                
-            except Exception as ml_err:
-                log_error(f"ML Processing in Bulk {filename}", str(ml_err))
+        avg_health = recent_preds.health_score if recent_preds else 100.0
+        max_cycles = recent_preds.cycle if recent_preds else 1
+        failure_risk = recent_preds.failure_probability if recent_preds else 0.0
 
         summary = db.query(domain.BatterySummary).filter(domain.BatterySummary.battery_id == bat_id_summary).first()
         if summary:
             summary.avg_health = avg_health
             summary.max_cycles = max_cycles
             summary.failure_risk = failure_risk
-            # We enforce saving remaining cycles logic structurally without schema alteration via max_cycles proxy if needed
-            # For exact prediction parity we update max_cycles to trace real capacity constraints securely
+            summary.last_updated = func.now()
         else:
             summary = domain.BatterySummary(
                 battery_id=bat_id_summary,
@@ -334,7 +389,7 @@ def get_battery_details(id: str, db: Session = Depends(get_db)):
     if not battery:
         raise HTTPException(status_code=404, detail="Battery not found")
         
-    predictions = db.query(domain.Prediction).filter(domain.Prediction.battery_id == id).order_by(domain.Prediction.cycle.asc()).all()
+    predictions = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == id).order_by(domain.BatteryPrediction.cycle.asc()).all()
     
     return {
         "id": battery.id,
@@ -343,8 +398,8 @@ def get_battery_details(id: str, db: Session = Depends(get_db)):
             {
                 "cycle": p.cycle,
                 "health_score": p.health_score,
-                "rul_cycles": p.rul_cycles,
-                "failure_risk": p.failure_risk
+                "rul_cycles": p.remaining_cycles,
+                "failure_risk": p.failure_probability
             } for p in predictions
         ]
     }
@@ -408,3 +463,170 @@ def create_maintenance_order(request: MaintenanceRequest, db: Session = Depends(
         "status": order.status,
         "message": f"Work order {order.id} generated."
     }
+
+@router.get("/models")
+def get_models():
+    """ Returns a list of available ML models """
+    return {"models": model_engine.available_models}
+
+@router.post("/model/select")
+def select_model(request: ModelSelectRequest, db: Session = Depends(get_db)):
+    """ Selects which ML model to use for future predictions """
+    if request.model_name not in model_engine.available_models:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+        
+    setting = db.query(domain.ModelSetting).first()
+    if not setting:
+        setting = domain.ModelSetting(selected_model=request.model_name)
+        db.add(setting)
+    else:
+        setting.selected_model = request.model_name
+    db.commit()
+    return {"status": "success", "selected_model": request.model_name}
+
+@router.get("/predictions/{battery_id}")
+def get_battery_predictions(battery_id: str, db: Session = Depends(get_db)):
+    """ Returns history of predictions for a specific battery """
+    predictions = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == battery_id).order_by(domain.BatteryPrediction.cycle.desc()).limit(100).all()
+    return predictions
+
+@router.get("/analytics/health-distribution")
+def get_health_distribution(db: Session = Depends(get_db)):
+    """ Groups active batteries into health distribution buckets """
+    summaries = db.query(domain.BatterySummary).all()
+    bins = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+    for s in summaries:
+        h = s.avg_health
+        if h <= 20: bins["0-20"] += 1
+        elif h <= 40: bins["21-40"] += 1
+        elif h <= 60: bins["41-60"] += 1
+        elif h <= 80: bins["61-80"] += 1
+        else: bins["81-100"] += 1
+    return bins
+
+@router.get("/analytics/failure-risk")
+def get_failure_risk(db: Session = Depends(get_db)):
+    """ Computes aggregate failure risk metrics """
+    summaries = db.query(domain.BatterySummary).all()
+    total = len(summaries)
+    if total == 0: return {"average_risk": 0.0, "high_risk_count": 0}
+    high_risk = sum(1 for s in summaries if s.failure_risk > 0.8)
+    avg_risk = sum(s.failure_risk for s in summaries) / total
+    return {"average_risk": round(avg_risk, 2), "high_risk_count": high_risk}
+
+@router.post("/recompute-ml")
+def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
+    """ 
+    Synthesizes and dynamically routes legacy records into the new ML processing layer securely in batches 
+    """
+    try:
+        from sqlalchemy import func
+        # Find all battery_ids that have no BatteryPrediction records yet
+        subquery = db.query(domain.BatteryPrediction.battery_id)
+        legacy_batteries = db.query(domain.Battery.id).filter(domain.Battery.id.notin_(subquery)).limit(batch_size).all()
+        
+        if not legacy_batteries:
+            return {"status": "success", "message": "No legacy batteries pending recomputation.", "batteries_processed": 0}
+            
+        setting = db.query(domain.ModelSetting).first()
+        selected_model = setting.selected_model if setting else "physics_model"
+        
+        legacy_ids = [str(b.id) for b in legacy_batteries]
+        processed_count = 0
+        
+        for bat_id in legacy_ids:
+            # Reconstruct sequence using legacy Prediction items tracking historic cycles natively
+            legacy_cycles = db.query(domain.Prediction).filter(domain.Prediction.battery_id == bat_id).order_by(domain.Prediction.cycle.asc()).all()
+            
+            battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
+            
+            if not legacy_cycles:
+                # Mock a single base cycle safely
+                legacy_cycles = [domain.Prediction(cycle=1, health_score=100.0, rul_cycles=1000.0, failure_risk=0.0)]
+                
+            for p in legacy_cycles:
+                # Feature Extraction simulation (proxy since raw time-series telemetry arrays dropped contextually)
+                cycle_dict = {
+                    "time": [0.0, 3600.0],
+                    "voltage": [3.7 - (0.01 * p.cycle), 3.7 - (0.01 * p.cycle)], # simulate voltage drop mildly
+                    "current": [1.5, -1.5],
+                    "temperature": [25.0 + (0.02 * p.cycle), 25.0 + (0.02 * p.cycle)] # simulate heating securely
+                }
+                features = extract_features(cycle_dict, p.cycle)
+                
+                # ML Prediction integration
+                results = model_engine.predict(features, selected_model)
+                
+                # Map extracted bounds back natively
+                bat_feat = domain.BatteryFeature(
+                    battery_id=bat_id,
+                    cycle=p.cycle,
+                    cycle_count=features.get("cycle_count"),
+                    average_voltage=features.get("average_voltage"),
+                    max_voltage=features.get("max_voltage"),
+                    min_voltage=features.get("min_voltage"),
+                    average_current=features.get("average_current"),
+                    average_temperature=features.get("average_temperature"),
+                    capacity_fade=features.get("capacity_fade"),
+                    internal_resistance=features.get("internal_resistance"),
+                    charge_time=features.get("charge_time"),
+                    discharge_time=features.get("discharge_time"),
+                    energy_efficiency=features.get("energy_efficiency"),
+                    voltage_variance=features.get("voltage_variance"),
+                    temperature_variance=features.get("temperature_variance"),
+                    current_variance=features.get("current_variance")
+                )
+                db.add(bat_feat)
+
+                prediction_db = domain.BatteryPrediction(
+                    battery_id=bat_id,
+                    cycle=p.cycle,
+                    model_name=selected_model,
+                    health_score=results["health_score"],
+                    remaining_cycles=results["remaining_cycles"],
+                    remaining_days=results["remaining_days"],
+                    failure_probability=results["failure_probability"]
+                )
+                db.add(prediction_db)
+                
+                # Dynamic Alerting loop natively evaluating thresholds safely
+                if results["failure_probability"] > 0.8:
+                    alert = domain.Alert(
+                        battery_id=bat_id,
+                        severity="CRITICAL",
+                        message=f"Critical failure probability detected by {selected_model} during cycle {p.cycle}."
+                    )
+                    db.add(alert)
+                    if battery:
+                        battery.status = "CRITICAL"
+                        
+            # Update specific summary boundary securely post telemetry loops
+            recent_preds = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == bat_id).order_by(domain.BatteryPrediction.cycle.desc()).limit(1).first()
+            if recent_preds:
+                summary = db.query(domain.BatterySummary).filter(domain.BatterySummary.battery_id == bat_id).first()
+                if summary:
+                    summary.avg_health = recent_preds.health_score
+                    summary.max_cycles = recent_preds.cycle
+                    summary.failure_risk = recent_preds.failure_probability
+                    summary.last_updated = func.now()
+                else:
+                    summary = domain.BatterySummary(
+                        battery_id=bat_id,
+                        avg_health=recent_preds.health_score,
+                        max_cycles=recent_preds.cycle,
+                        failure_risk=recent_preds.failure_probability
+                    )
+                    db.add(summary)
+            
+            processed_count += 1
+            db.commit() # Commit natively per batched object structurally resolving timeouts
+            
+        return {
+            "status": "success", 
+            "message": f"Successfully recomputed ML logic for {processed_count} batteries.",
+            "batteries_processed": processed_count
+        }
+    except Exception as e:
+        log_error("Recompute ML Pipe", str(e))
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

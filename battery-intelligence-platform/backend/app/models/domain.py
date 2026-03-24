@@ -77,3 +77,44 @@ class ProcessedFile(Base):
     filename = Column(String(255), primary_key=True, index=True)
     processed_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class BatteryFeature(Base):
+    __tablename__ = "battery_features"
+
+    id = Column(Integer, primary_key=True, index=True)
+    battery_id = Column(String(50), ForeignKey("batteries.id"), nullable=False)
+    cycle = Column(Integer, nullable=False)
+    cycle_count = Column(Integer)
+    average_voltage = Column(Float)
+    max_voltage = Column(Float)
+    min_voltage = Column(Float)
+    average_current = Column(Float)
+    average_temperature = Column(Float)
+    capacity_fade = Column(Float)
+    internal_resistance = Column(Float)
+    charge_time = Column(Float)
+    discharge_time = Column(Float)
+    energy_efficiency = Column(Float)
+    voltage_variance = Column(Float)
+    temperature_variance = Column(Float)
+    current_variance = Column(Float)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class BatteryPrediction(Base):
+    __tablename__ = "battery_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    battery_id = Column(String(50), ForeignKey("batteries.id"), nullable=False)
+    cycle = Column(Integer, nullable=False)
+    model_name = Column(String(100), nullable=False)
+    health_score = Column(Float, nullable=False)
+    failure_probability = Column(Float, nullable=False)
+    remaining_cycles = Column(Float, nullable=False)
+    remaining_days = Column(Float)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ModelSetting(Base):
+    __tablename__ = "model_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    selected_model = Column(String(100), default="physics_model")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

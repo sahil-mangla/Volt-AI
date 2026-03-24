@@ -46,3 +46,6 @@ class AlertResponse(BaseModel):
     message: str
     is_resolved: bool
     created_at: datetime
+
+class ModelSelectRequest(BaseModel):
+    model_name: str
