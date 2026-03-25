@@ -585,70 +585,113 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
         processed_count = 0
         
         for bat_id in legacy_ids:
-            # Reconstruct sequence using legacy Prediction items tracking historic cycles natively
-            legacy_cycles = db.query(domain.Prediction).filter(domain.Prediction.battery_id == bat_id).order_by(domain.Prediction.cycle.asc()).all()
+            # Check if BatteryFeature records already exist for this battery
+            existing_features = db.query(domain.BatteryFeature).filter(domain.BatteryFeature.battery_id == bat_id).order_by(domain.BatteryFeature.cycle.asc()).all()
             
             battery = db.query(domain.Battery).filter(domain.Battery.id == bat_id).first()
             
-            if not legacy_cycles:
-                # Mock a single base cycle safely
-                legacy_cycles = [domain.Prediction(cycle=1, health_score=100.0, rul_cycles=1000.0, failure_risk=0.0)]
-                
-            for p in legacy_cycles:
-                # Feature Extraction simulation (proxy since raw time-series telemetry arrays dropped contextually)
-                cycle_dict = {
-                    "time": [0.0, 3600.0],
-                    "voltage": [3.7 - (0.01 * p.cycle), 3.7 - (0.01 * p.cycle)], # simulate voltage drop mildly
-                    "current": [1.5, -1.5],
-                    "temperature": [25.0 + (0.02 * p.cycle), 25.0 + (0.02 * p.cycle)] # simulate heating securely
-                }
-                features = extract_features(cycle_dict, p.cycle)
-                
-                # ML Prediction integration
-                results = model_engine.predict(features, selected_model)
-                
-                # Map extracted bounds back natively
-                bat_feat = domain.BatteryFeature(
-                    battery_id=bat_id,
-                    cycle=p.cycle,
-                    cycle_count=features.get("cycle_count"),
-                    average_voltage=features.get("average_voltage"),
-                    max_voltage=features.get("max_voltage"),
-                    min_voltage=features.get("min_voltage"),
-                    average_current=features.get("average_current"),
-                    average_temperature=features.get("average_temperature"),
-                    capacity_fade=features.get("capacity_fade"),
-                    internal_resistance=features.get("internal_resistance"),
-                    charge_time=features.get("charge_time"),
-                    discharge_time=features.get("discharge_time"),
-                    energy_efficiency=features.get("energy_efficiency"),
-                    voltage_variance=features.get("voltage_variance"),
-                    temperature_variance=features.get("temperature_variance"),
-                    current_variance=features.get("current_variance")
-                )
-                db.add(bat_feat)
-
-                prediction_db = domain.BatteryPrediction(
-                    battery_id=bat_id,
-                    cycle=p.cycle,
-                    model_name=selected_model,
-                    health_score=results["health_score"],
-                    remaining_cycles=results["remaining_cycles"],
-                    remaining_days=results["remaining_days"],
-                    failure_probability=results["failure_probability"]
-                )
-                db.add(prediction_db)
-                
-                # Dynamic Alerting loop natively evaluating thresholds safely
-                if results["failure_probability"] > 0.8:
-                    alert = domain.Alert(
+            if existing_features:
+                # USE EXISTING FEATURES: Skip simulation and extraction
+                for f in existing_features:
+                    features = {
+                        "cycle_count": f.cycle_count,
+                        "average_voltage": f.average_voltage,
+                        "max_voltage": f.max_voltage,
+                        "min_voltage": f.min_voltage,
+                        "average_current": f.average_current,
+                        "average_temperature": f.average_temperature,
+                        "capacity_fade": f.capacity_fade,
+                        "internal_resistance": f.internal_resistance,
+                        "charge_time": f.charge_time,
+                        "discharge_time": f.discharge_time,
+                        "energy_efficiency": f.energy_efficiency,
+                        "voltage_variance": f.voltage_variance,
+                        "temperature_variance": f.temperature_variance,
+                        "current_variance": f.current_variance
+                    }
+                    results = model_engine.predict(features, selected_model)
+                    
+                    prediction_db = domain.BatteryPrediction(
                         battery_id=bat_id,
-                        severity="CRITICAL",
-                        message=f"Critical failure probability detected by {selected_model} during cycle {p.cycle}."
+                        cycle=f.cycle,
+                        model_name=selected_model,
+                        health_score=results["health_score"],
+                        remaining_cycles=results["remaining_cycles"],
+                        remaining_days=results["remaining_days"],
+                        failure_probability=results["failure_probability"]
                     )
-                    db.add(alert)
-                    if battery:
-                        battery.status = "CRITICAL"
+                    db.add(prediction_db)
+                    
+                    if results["failure_probability"] > 0.8:
+                        alert = domain.Alert(
+                            battery_id=bat_id,
+                            severity="CRITICAL",
+                            message=f"Critical failure probability detected by {selected_model} during cycle {f.cycle}."
+                        )
+                        db.add(alert)
+                        if battery:
+                            battery.status = "CRITICAL"
+            else:
+                # LEGACY FALLBACK: Reconstruct sequence using legacy Prediction items
+                legacy_cycles = db.query(domain.Prediction).filter(domain.Prediction.battery_id == bat_id).order_by(domain.Prediction.cycle.asc()).all()
+                
+                if not legacy_cycles:
+                    # Mock a single base cycle safely
+                    legacy_cycles = [domain.Prediction(cycle=1, health_score=100.0, rul_cycles=1000.0, failure_risk=0.0)]
+                    
+                for p in legacy_cycles:
+                    # Feature Extraction simulation
+                    cycle_dict = {
+                        "time": [0.0, 3600.0],
+                        "voltage": [3.7 - (0.01 * p.cycle), 3.7 - (0.01 * p.cycle)], 
+                        "current": [1.5, -1.5],
+                        "temperature": [25.0 + (0.02 * p.cycle), 25.0 + (0.02 * p.cycle)]
+                    }
+                    features = extract_features(cycle_dict, p.cycle)
+                    results = model_engine.predict(features, selected_model)
+                    
+                    # Save Extracted Features
+                    bat_feat = domain.BatteryFeature(
+                        battery_id=bat_id,
+                        cycle=p.cycle,
+                        cycle_count=features.get("cycle_count"),
+                        average_voltage=features.get("average_voltage"),
+                        max_voltage=features.get("max_voltage"),
+                        min_voltage=features.get("min_voltage"),
+                        average_current=features.get("average_current"),
+                        average_temperature=features.get("average_temperature"),
+                        capacity_fade=features.get("capacity_fade"),
+                        internal_resistance=features.get("internal_resistance"),
+                        charge_time=features.get("charge_time"),
+                        discharge_time=features.get("discharge_time"),
+                        energy_efficiency=features.get("energy_efficiency"),
+                        voltage_variance=features.get("voltage_variance"),
+                        temperature_variance=features.get("temperature_variance"),
+                        current_variance=features.get("current_variance")
+                    )
+                    db.add(bat_feat)
+
+                    # Save Prediction
+                    prediction_db = domain.BatteryPrediction(
+                        battery_id=bat_id,
+                        cycle=p.cycle,
+                        model_name=selected_model,
+                        health_score=results["health_score"],
+                        remaining_cycles=results["remaining_cycles"],
+                        remaining_days=results["remaining_days"],
+                        failure_probability=results["failure_probability"]
+                    )
+                    db.add(prediction_db)
+                    
+                    if results["failure_probability"] > 0.8:
+                        alert = domain.Alert(
+                            battery_id=bat_id,
+                            severity="CRITICAL",
+                            message=f"Critical failure probability detected by {selected_model} during cycle {p.cycle}."
+                        )
+                        db.add(alert)
+                        if battery:
+                            battery.status = "CRITICAL"
                         
             # Update specific summary boundary securely post telemetry loops
             recent_preds = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == bat_id).order_by(domain.BatteryPrediction.cycle.desc()).limit(1).first()
