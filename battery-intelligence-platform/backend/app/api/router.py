@@ -367,23 +367,22 @@ def get_fleet_statistics(db: Session = Depends(get_db)):
     """ Calculates fleet summary dynamically from the latest ML prediction per battery """
     from sqlalchemy import func
     
-    # Subquery: latest cycle per battery_id in battery_predictions
-    latest_cycle_subq = (
+    # Subquery: max id per battery_id in battery_predictions
+    latest_id_subq = (
         db.query(
             domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+            func.max(domain.BatteryPrediction.id).label("latest_id")
         )
         .group_by(domain.BatteryPrediction.battery_id)
         .subquery()
     )
     
-    # Get the actual latest prediction rows
+    # Get exactly one latest prediction row per battery
     latest_preds = (
         db.query(domain.BatteryPrediction)
         .join(
-            latest_cycle_subq,
-            (domain.BatteryPrediction.battery_id == latest_cycle_subq.c.battery_id) &
-            (domain.BatteryPrediction.created_at == latest_cycle_subq.c.latest_ts)
+            latest_id_subq,
+            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
         )
         .all()
     )
@@ -429,10 +428,10 @@ def get_active_alerts(db: Session = Depends(get_db)):
     """ Lists at-risk batteries based on their latest ML prediction """
     from sqlalchemy import func
     
-    latest_ts_subq = (
+    latest_id_subq = (
         db.query(
             domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+            func.max(domain.BatteryPrediction.id).label("latest_id")
         )
         .group_by(domain.BatteryPrediction.battery_id)
         .subquery()
@@ -441,9 +440,8 @@ def get_active_alerts(db: Session = Depends(get_db)):
     latest_preds = (
         db.query(domain.BatteryPrediction)
         .join(
-            latest_ts_subq,
-            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
-            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+            latest_id_subq,
+            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
         )
         .filter(
             (domain.BatteryPrediction.health_score < 70) |
@@ -557,10 +555,10 @@ def get_health_distribution(db: Session = Depends(get_db)):
     """ Groups batteries into health buckets based on their latest prediction """
     from sqlalchemy import func
     
-    latest_ts_subq = (
+    latest_id_subq = (
         db.query(
             domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+            func.max(domain.BatteryPrediction.id).label("latest_id")
         )
         .group_by(domain.BatteryPrediction.battery_id)
         .subquery()
@@ -569,9 +567,8 @@ def get_health_distribution(db: Session = Depends(get_db)):
     latest_preds = (
         db.query(domain.BatteryPrediction)
         .join(
-            latest_ts_subq,
-            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
-            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+            latest_id_subq,
+            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
         )
         .all()
     )
@@ -591,10 +588,10 @@ def get_failure_risk(db: Session = Depends(get_db)):
     """ Computes aggregate failure risk using the latest prediction per battery """
     from sqlalchemy import func
     
-    latest_ts_subq = (
+    latest_id_subq = (
         db.query(
             domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.created_at).label("latest_ts")
+            func.max(domain.BatteryPrediction.id).label("latest_id")
         )
         .group_by(domain.BatteryPrediction.battery_id)
         .subquery()
@@ -603,9 +600,8 @@ def get_failure_risk(db: Session = Depends(get_db)):
     latest_preds = (
         db.query(domain.BatteryPrediction)
         .join(
-            latest_ts_subq,
-            (domain.BatteryPrediction.battery_id == latest_ts_subq.c.battery_id) &
-            (domain.BatteryPrediction.created_at == latest_ts_subq.c.latest_ts)
+            latest_id_subq,
+            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
         )
         .all()
     )
