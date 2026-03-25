@@ -740,15 +740,30 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 def recompute_all_background(batch_size: int = 50):
-    """ Background thread runner that processes all pending batteries """
+    """ Background thread runner that processes all pending batteries with error resilience """
     db = SessionLocal()
     try:
+        print("ML recompute background worker started.")
         while True:
-            result = recompute_ml_internal(db, batch_size)
-            if result.get("remaining", 0) == 0 or result.get("batteries_processed_this_batch", 0) == 0:
-                break
+            try:
+                result = recompute_ml_internal(db, batch_size)
+                remaining = result.get("remaining", 0)
+                processed = result.get("batteries_processed_this_batch", 0)
+                
+                print(f"Processed batch ({processed} batteries). Remaining: {remaining}")
+                
+                if remaining == 0 or processed == 0:
+                    print("ML recompute completed.")
+                    break
+            except Exception as batch_error:
+                print(f"Error processing ML batch: {batch_error}")
+                # Log error but continue to next attempt/thread rotation
+                log_error("Background Recompute Batch", str(batch_error))
+                # Optional: add a small sleep if desired to prevent tight loop on repeat failures
+                continue
     except Exception as e:
-        log_error("Background Recompute", str(e))
+        log_error("Background Recompute Fatal", str(e))
+        print(f"Background recompute worker encountered fatal error: {e}")
     finally:
         db.close()
 

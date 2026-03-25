@@ -9,27 +9,22 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./battery_data.db")
 
 connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 
-engine = None
-SessionLocal = None
+# Initialize engine and SessionLocal at module level for background thread reliability
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=True
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    global engine, SessionLocal
-    try:
-        engine = create_engine(
-            DATABASE_URL,
-            connect_args=connect_args,
-            pool_pre_ping=True
-        )
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        logger.info("Database engine initialized.")
-    except Exception as e:
-        logger.error(f"Failed to initialize database engine: {e}")
+    # Model tables are created via Base.metadata.create_all(bind=engine) in main.py
+    logger.info("Database engine and SessionLocal initialized at module level.")
 
 Base = declarative_base()
 
 def get_db():
-    if not SessionLocal:
-        raise RuntimeError("Database not initialized")
+    # SessionLocal is now guaranteed to be a callable sessionmaker
     db = SessionLocal()
     try:
         yield db
