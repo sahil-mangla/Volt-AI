@@ -13,7 +13,7 @@ from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, 
 from app.features.extractor import extract_features
 from app.ml_engine.engine import model_engine
 from app.utils.logger import log_prediction, log_alert, log_maintenance, log_error
-from app.api.analytics import get_latest_predictions_query
+from app.api.analytics import get_latest_predictions_query, get_ml_progress
 
 router = APIRouter()
 
@@ -559,6 +559,11 @@ def get_failure_risk(db: Session = Depends(get_db)):
     avg_risk = sum(p.failure_probability for p in latest_preds) / total
     return {"average_risk": round(avg_risk, 2), "high_risk_count": high_risk}
 
+@router.get("/ml/progress")
+def get_ml_recompute_progress(db: Session = Depends(get_db)):
+    """ Returns current ML recompute progress metrics """
+    return get_ml_progress(db)
+
 @router.post("/recompute-ml")
 def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
     """ 
@@ -666,12 +671,39 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
             processed_count += 1
             db.commit() # Commit natively per batched object structurally resolving timeouts
             
+        progress = get_ml_progress(db)
         return {
             "status": "success", 
             "message": f"Successfully recomputed ML logic for {processed_count} batteries.",
-            "batteries_processed": processed_count
+            "batteries_processed_this_batch": processed_count,
+            "total_batteries_with_predictions": progress["batteries_with_predictions"],
+            "remaining": progress["batteries_remaining"],
+            "progress_percent": progress["progress_percent"]
         }
     except Exception as e:
         log_error("Recompute ML Pipe", str(e))
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/recompute-ml/all")
+def recompute_all_ml(batch_size: int = 50, db: Session = Depends(get_db)):
+    """ 
+    Internal loop that processes all legacy batteries in batches until completion.
+    Returns a final summary when the entire fleet has been recomputed.
+    """
+    total_processed = 0
+    while True:
+        result = recompute_ml(batch_size=batch_size, db=db)
+        batch_count = result.get("batteries_processed_this_batch", 0)
+        total_processed += batch_count
+        
+        if batch_count == 0:
+            break
+            
+    progress = get_ml_progress(db)
+    return {
+        "status": "success",
+        "message": f"Full fleet recompute complete. Processed {total_processed} batteries.",
+        "total_processed": total_processed,
+        "final_progress": progress
+    }
