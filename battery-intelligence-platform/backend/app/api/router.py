@@ -493,6 +493,22 @@ def get_debug_latest_count(db: Session = Depends(get_db)):
         "unique_battery_ids": unique_ids
     }
 
+@router.get("/debug/prediction-coverage")
+def get_prediction_coverage(db: Session = Depends(get_db)):
+    """ Checks how many batteries have prediction records vs total batteries """
+    from sqlalchemy import func, distinct
+
+    unique_batteries = db.query(func.count(distinct(domain.Battery.id))).scalar()
+    batteries_with_predictions = db.query(func.count(distinct(domain.BatteryPrediction.battery_id))).scalar()
+    prediction_records = db.query(func.count(domain.BatteryPrediction.id)).scalar()
+
+    return {
+        "unique_batteries": unique_batteries,
+        "batteries_with_predictions": batteries_with_predictions,
+        "batteries_without_predictions": unique_batteries - batteries_with_predictions,
+        "prediction_records": prediction_records
+    }
+
 @router.get("/models")
 def get_models():
     """ Returns a list of available ML models """
