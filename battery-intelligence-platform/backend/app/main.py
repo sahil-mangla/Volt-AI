@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import session
-from app.database.session import init_db
+from app.database.session import engine, Base
 from app.api.router import router
+from app.models import domain  # ensure all models are registered before create_all
+
 app = FastAPI(
     title="VoltAI Battery Intelligence API",
     description="Production-ready predictive maintenance backend.",
@@ -11,7 +12,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,13 +23,11 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
-
-
 @app.on_event("startup")
 def startup_event():
-    init_db()
-    if session.engine:
-        session.Base.metadata.create_all(bind=session.engine)
+    # Only initialize DB schema — no CSV processing, no ML, no background tasks
+    Base.metadata.create_all(bind=engine)
+    print("VoltAI API started successfully.")
 
-# Mount API 
+# Mount API
 app.include_router(router, prefix="/api", tags=["API Endpoints"])
