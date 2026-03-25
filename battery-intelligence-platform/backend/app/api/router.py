@@ -13,6 +13,7 @@ from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, 
 from app.features.extractor import extract_features
 from app.ml_engine.engine import model_engine
 from app.utils.logger import log_prediction, log_alert, log_maintenance, log_error
+from app.api.analytics import get_latest_predictions_query
 
 router = APIRouter()
 
@@ -365,30 +366,9 @@ def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
 @router.get("/fleet/summary")
 def get_fleet_statistics(db: Session = Depends(get_db)):
     """ Calculates fleet summary dynamically from the latest ML prediction per battery """
-    from sqlalchemy import func
-    
-    # Subquery: max id per battery_id in battery_predictions
-    latest_id_subq = (
-        db.query(
-            domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.id).label("latest_id")
-        )
-        .group_by(domain.BatteryPrediction.battery_id)
-        .subquery()
-    )
-    
-    # Get exactly one latest prediction row per battery
-    latest_preds = (
-        db.query(domain.BatteryPrediction)
-        .join(
-            latest_id_subq,
-            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
-        )
-        .all()
-    )
-    
+    latest_preds = get_latest_predictions_query(db).all()
     total_batteries = len(latest_preds)
-    
+
     if total_batteries == 0:
         return {"avg_health": 0, "predicted_failures": 0, "total_batteries": 0}
     
@@ -426,23 +406,8 @@ def get_battery_details(id: str, db: Session = Depends(get_db)):
 @router.get("/alerts")
 def get_active_alerts(db: Session = Depends(get_db)):
     """ Lists at-risk batteries based on their latest ML prediction """
-    from sqlalchemy import func
-    
-    latest_id_subq = (
-        db.query(
-            domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.id).label("latest_id")
-        )
-        .group_by(domain.BatteryPrediction.battery_id)
-        .subquery()
-    )
-
     latest_preds = (
-        db.query(domain.BatteryPrediction)
-        .join(
-            latest_id_subq,
-            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
-        )
+        get_latest_predictions_query(db)
         .filter(
             (domain.BatteryPrediction.health_score < 70) |
             (domain.BatteryPrediction.failure_probability > 0.6)
@@ -452,13 +417,7 @@ def get_active_alerts(db: Session = Depends(get_db)):
     
     results = []
     for p in latest_preds:
-        if p.health_score < 50 or p.failure_probability > 0.8:
-            status_str = "Critical"
-        elif p.health_score < 70 or p.failure_probability > 0.6:
-            status_str = "Warning"
-        else:
-            status_str = "Warning"
-
+        status_str = "Critical" if p.health_score < 50 or p.failure_probability > 0.8 else "Warning"
         results.append({
             "battery_id": p.battery_id,
             "health": round(p.health_score, 1),
@@ -526,30 +485,9 @@ def get_debug_counts(db: Session = Depends(get_db)):
 
 @router.get("/debug/latest-count")
 def get_debug_latest_count(db: Session = Depends(get_db)):
-    """ Verifies that the latest-prediction subquery returns exactly one row per battery """
-    from sqlalchemy import func, distinct
-
-    # Same subquery used in all analytics endpoints
-    latest_id_subq = (
-        db.query(
-            domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.id).label("latest_id")
-        )
-        .group_by(domain.BatteryPrediction.battery_id)
-        .subquery()
-    )
-
-    latest_preds = (
-        db.query(domain.BatteryPrediction)
-        .join(
-            latest_id_subq,
-            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
-        )
-        .all()
-    )
-
+    """ Verifies that the latest-prediction query returns exactly one row per battery """
+    latest_preds = get_latest_predictions_query(db).all()
     unique_ids = len(set(p.battery_id for p in latest_preds))
-
     return {
         "latest_prediction_rows": len(latest_preds),
         "unique_battery_ids": unique_ids
@@ -584,26 +522,7 @@ def get_battery_predictions(battery_id: str, db: Session = Depends(get_db)):
 @router.get("/analytics/health-distribution")
 def get_health_distribution(db: Session = Depends(get_db)):
     """ Groups batteries into health buckets based on their latest prediction """
-    from sqlalchemy import func
-    
-    latest_id_subq = (
-        db.query(
-            domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.id).label("latest_id")
-        )
-        .group_by(domain.BatteryPrediction.battery_id)
-        .subquery()
-    )
-    
-    latest_preds = (
-        db.query(domain.BatteryPrediction)
-        .join(
-            latest_id_subq,
-            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
-        )
-        .all()
-    )
-    
+    latest_preds = get_latest_predictions_query(db).all()
     bins = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
     for p in latest_preds:
         h = p.health_score
@@ -617,26 +536,7 @@ def get_health_distribution(db: Session = Depends(get_db)):
 @router.get("/analytics/failure-risk")
 def get_failure_risk(db: Session = Depends(get_db)):
     """ Computes aggregate failure risk using the latest prediction per battery """
-    from sqlalchemy import func
-    
-    latest_id_subq = (
-        db.query(
-            domain.BatteryPrediction.battery_id,
-            func.max(domain.BatteryPrediction.id).label("latest_id")
-        )
-        .group_by(domain.BatteryPrediction.battery_id)
-        .subquery()
-    )
-    
-    latest_preds = (
-        db.query(domain.BatteryPrediction)
-        .join(
-            latest_id_subq,
-            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
-        )
-        .all()
-    )
-    
+    latest_preds = get_latest_predictions_query(db).all()
     total = len(latest_preds)
     if total == 0: return {"average_risk": 0.0, "high_risk_count": 0}
     high_risk = sum(1 for p in latest_preds if p.failure_probability > 0.8)
