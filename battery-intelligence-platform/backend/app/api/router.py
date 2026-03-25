@@ -8,6 +8,7 @@ import io
 from app.services.blob_service import blob_service
 
 import threading
+import time
 from app.database.session import get_db, SessionLocal
 from app.models import domain
 from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, AlertResponse, MaintenanceRequest, MaintenanceResponse, ModelSelectRequest
@@ -752,9 +753,12 @@ def recompute_all_background(batch_size: int = 50):
                 
                 print(f"Processed batch ({processed} batteries). Remaining: {remaining}")
                 
-                if remaining == 0 or processed == 0:
+                if remaining == 0:
                     print("ML recompute completed.")
                     break
+                
+                # Throttle execution to prevent tight loop Resource exhaustion
+                time.sleep(1)
             except Exception as batch_error:
                 print(f"Error processing ML batch: {batch_error}")
                 # Log error but continue to next attempt/thread rotation
