@@ -9,7 +9,7 @@ from app.services.blob_service import blob_service
 
 import threading
 import time
-from app.database.session import get_db, SessionLocal
+from app.database.session import get_db, SessionLocal, engine
 from app.models import domain
 from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, AlertResponse, MaintenanceRequest, MaintenanceResponse, ModelSelectRequest
 from app.features.extractor import extract_features
@@ -530,6 +530,11 @@ def select_model(request: ModelSelectRequest, db: Session = Depends(get_db)):
         setting.selected_model = request.model_name
     db.commit()
     return {"status": "success", "selected_model": request.model_name}
+
+@router.get("/debug/db-url", response_model=None)
+def get_db_url():
+    """ Returns the active database URL for connection verification """
+    return {"database_url": str(engine.url)}
 
 @router.get("/predictions/{battery_id}", response_model=None)
 def get_battery_predictions(battery_id: str, db: Session = Depends(get_db)):
