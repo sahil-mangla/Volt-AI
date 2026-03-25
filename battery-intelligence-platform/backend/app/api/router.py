@@ -188,11 +188,11 @@ def __process_blob_csv(filename: str, db: Session) -> int:
             battery_id=bat_id,
             cycle=cycle,
             cycle_count=features.get("cycle_count"),
-            average_voltage=features.get("average_voltage"),
+            avg_voltage=features.get("avg_voltage"),
             max_voltage=features.get("max_voltage"),
             min_voltage=features.get("min_voltage"),
-            average_current=features.get("average_current"),
-            average_temperature=features.get("average_temperature"),
+            avg_current=features.get("avg_current"),
+            avg_temperature=features.get("avg_temperature"),
             capacity_fade=features.get("capacity_fade"),
             internal_resistance=features.get("internal_resistance"),
             charge_time=features.get("charge_time"),
@@ -200,7 +200,9 @@ def __process_blob_csv(filename: str, db: Session) -> int:
             energy_efficiency=features.get("energy_efficiency"),
             voltage_variance=features.get("voltage_variance"),
             temperature_variance=features.get("temperature_variance"),
-            current_variance=features.get("current_variance")
+            current_variance=features.get("current_variance"),
+            capacity_ah=features.get("capacity_ah"),
+            energy_throughput=features.get("energy_throughput")
         )
         db.add(bat_feat)
 

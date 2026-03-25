@@ -15,7 +15,7 @@ class User(Base):
 class Battery(Base):
     __tablename__ = "batteries"
 
-    id = Column(String(50), primary_key=True, index=True)
+    id = Column(String(50), primary_key=True, unique=True, index=True)
     model_type = Column(String(100))
     capacity = Column(Float, nullable=False)
     status = Column(String(50), default="HEALTHY")
