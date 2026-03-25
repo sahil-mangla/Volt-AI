@@ -58,7 +58,7 @@ class ModelEngine:
 
     def _xgboost_model_inference(self, features: dict) -> dict:
         # Non-linear heuristic representing tree splits
-        avg_temp = features.get('average_temperature', 25.0)
+        avg_temp = features.get('avg_temperature', 25.0)
         cap_fade = features.get('capacity_fade', 0.0)
 
         health_score = 100.0
