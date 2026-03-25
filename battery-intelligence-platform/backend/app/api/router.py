@@ -505,6 +505,27 @@ def create_maintenance_order(request: MaintenanceRequest, db: Session = Depends(
         "message": f"Work order {order.id} generated."
     }
 
+@router.get("/debug/counts")
+def get_debug_counts(db: Session = Depends(get_db)):
+    """ Returns database row counts for debugging and integrity verification """
+    from sqlalchemy import func, distinct
+
+    unique_batteries = db.query(func.count(distinct(domain.Battery.id))).scalar()
+    feature_records = db.query(func.count(domain.BatteryFeature.id)).scalar()
+    prediction_records = db.query(func.count(domain.BatteryPrediction.id)).scalar()
+    alert_records = db.query(func.count(domain.Alert.id)).scalar()
+    
+    # raw_records: count from legacy Prediction table
+    raw_records = db.query(func.count(domain.Prediction.id)).scalar()
+
+    return {
+        "unique_batteries": unique_batteries,
+        "raw_records": raw_records,
+        "feature_records": feature_records,
+        "prediction_records": prediction_records,
+        "alert_records": alert_records
+    }
+
 @router.get("/models")
 def get_models():
     """ Returns a list of available ML models """
