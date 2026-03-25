@@ -132,7 +132,7 @@ def upload_battery_data(file_context: dict, db: Session = Depends(get_db)):
     """ Placeholder for manual JSON dataset bulk upload process """
     return {"status": "success", "message": "File processed (Mocked upload endpoint)"}
 
-@router.post("/upload")
+@router.post("/upload", response_model=None)
 async def upload_file(file: UploadFile = File(...)):
     """ Uploads a CSV stream securely to the Azure Blob Container natively """
     try:
@@ -142,7 +142,7 @@ async def upload_file(file: UploadFile = File(...)):
         log_error("Blob Upload", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/files")
+@router.get("/files", response_model=None)
 def list_files():
     """ Returns index of telemetry datasets resting in the Blob container """
     try:
@@ -404,7 +404,7 @@ def get_battery_details(id: str, db: Session = Depends(get_db)):
         ]
     }
 
-@router.get("/alerts")
+@router.get("/alerts", response_model=None)
 def get_active_alerts(db: Session = Depends(get_db)):
     """ Lists at-risk batteries based on their latest ML prediction """
     latest_preds = (
@@ -510,7 +510,7 @@ def get_prediction_coverage(db: Session = Depends(get_db)):
         "prediction_records": prediction_records
     }
 
-@router.get("/models")
+@router.get("/models", response_model=None)
 def get_models():
     """ Returns a list of available ML models """
     return {"models": model_engine.available_models}
@@ -565,7 +565,6 @@ def get_ml_recompute_progress(db: Session = Depends(get_db)):
     """ Returns current ML recompute progress metrics """
     return get_ml_progress(db)
 
-@router.post("/recompute-ml")
 def recompute_ml_internal(db: Session, batch_size: int = 50):
     """ Internal recompute logic reusable across endpoints and background threads """
     try:
