@@ -18,7 +18,7 @@ from app.api.analytics import get_latest_predictions_query, get_ml_progress
 
 router = APIRouter()
 
-@router.post("/predict", response_model=PredictionResponse)
+@router.post("/predict", response_model=None)
 def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
     """
     Analyzes a single charge/discharge cycle array and returns predictions.
@@ -127,7 +127,7 @@ def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
         log_error("Prediction Endpoint", str(e))
         raise HTTPException(status_code=500, detail="Prediction failed")
 
-@router.post("/batteries")
+@router.post("/batteries", response_model=None)
 def upload_battery_data(file_context: dict, db: Session = Depends(get_db)):
     """ Placeholder for manual JSON dataset bulk upload process """
     return {"status": "success", "message": "File processed (Mocked upload endpoint)"}
@@ -258,7 +258,7 @@ def __process_blob_csv(filename: str, db: Session) -> int:
     return records_inserted
 
 
-@router.post("/process/{filename}")
+@router.post("/process/{filename}", response_model=None)
 def process_file(filename: str, db: Session = Depends(get_db)):
     """ Specific single-file processing via native HTTP trigger """
     try:
@@ -272,7 +272,7 @@ def process_file(filename: str, db: Session = Depends(get_db)):
         log_error("Blob Processing", str(e))
         raise HTTPException(status_code=500, detail=f"Failed to process CSV: {e}")
 
-@router.post("/process-all")
+@router.post("/process-all", response_model=None)
 def process_all_files(db: Session = Depends(get_db)):
     """ Triggers a bulk array crawl processing all valid CSV files resting statically within Azure Blob Container """
     try:
@@ -303,7 +303,7 @@ def process_all_files(db: Session = Depends(get_db)):
         log_error("Bulk Process Master Thread", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/process-batch")
+@router.post("/process-batch", response_model=None)
 def process_batch_files(batch_size: int = 50, db: Session = Depends(get_db)):
     """ Triggers a bulk array crawl processing a limited batch of valid CSV files sequentially resolving Azure Gateway timeouts """
     try:
@@ -347,7 +347,7 @@ def process_batch_files(batch_size: int = 50, db: Session = Depends(get_db)):
         log_error("Batch Process Master Thread", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/batteries", response_model=List[BatterySummary])
+@router.get("/batteries", response_model=None)
 def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
     """ Returns paginated fleet summary mapped natively to BatterySummary calculations """
     summaries = db.query(domain.BatterySummary).order_by(domain.BatterySummary.last_updated.desc()).limit(limit).all()
@@ -364,7 +364,7 @@ def get_fleet_summary(limit: int = 50, db: Session = Depends(get_db)):
         })
     return result
 
-@router.get("/fleet/summary")
+@router.get("/fleet/summary", response_model=None)
 def get_fleet_statistics(db: Session = Depends(get_db)):
     """ Calculates fleet summary dynamically from the latest ML prediction per battery """
     latest_preds = get_latest_predictions_query(db).all()
@@ -382,7 +382,7 @@ def get_fleet_statistics(db: Session = Depends(get_db)):
         "total_batteries": total_batteries
     }
 
-@router.get("/batteries/{id}")
+@router.get("/batteries/{id}", response_model=None)
 def get_battery_details(id: str, db: Session = Depends(get_db)):
     """ Detailed history of a specific battery id """
     battery = db.query(domain.Battery).filter(domain.Battery.id == id).first()
@@ -428,7 +428,7 @@ def get_active_alerts(db: Session = Depends(get_db)):
         
     return results
 
-@router.post("/maintenance/create", response_model=MaintenanceResponse)
+@router.post("/maintenance/create", response_model=None)
 def create_maintenance_order(request: MaintenanceRequest, db: Session = Depends(get_db)):
     """ Generate a maintenance ticket and mark battery as MAINTENANCE """
     battery = db.query(domain.Battery).filter(domain.Battery.id == request.battery_id).first()
@@ -463,7 +463,7 @@ def create_maintenance_order(request: MaintenanceRequest, db: Session = Depends(
         "message": f"Work order {order.id} generated."
     }
 
-@router.get("/debug/counts")
+@router.get("/debug/counts", response_model=None)
 def get_debug_counts(db: Session = Depends(get_db)):
     """ Returns database row counts for debugging and integrity verification """
     from sqlalchemy import func, distinct
@@ -484,7 +484,7 @@ def get_debug_counts(db: Session = Depends(get_db)):
         "alert_records": alert_records
     }
 
-@router.get("/debug/latest-count")
+@router.get("/debug/latest-count", response_model=None)
 def get_debug_latest_count(db: Session = Depends(get_db)):
     """ Verifies that the latest-prediction query returns exactly one row per battery """
     latest_preds = get_latest_predictions_query(db).all()
@@ -494,7 +494,7 @@ def get_debug_latest_count(db: Session = Depends(get_db)):
         "unique_battery_ids": unique_ids
     }
 
-@router.get("/debug/prediction-coverage")
+@router.get("/debug/prediction-coverage", response_model=None)
 def get_prediction_coverage(db: Session = Depends(get_db)):
     """ Checks how many batteries have prediction records vs total batteries """
     from sqlalchemy import func, distinct
@@ -515,7 +515,7 @@ def get_models():
     """ Returns a list of available ML models """
     return {"models": model_engine.available_models}
 
-@router.post("/model/select")
+@router.post("/model/select", response_model=None)
 def select_model(request: ModelSelectRequest, db: Session = Depends(get_db)):
     """ Selects which ML model to use for future predictions """
     if request.model_name not in model_engine.available_models:
@@ -530,13 +530,13 @@ def select_model(request: ModelSelectRequest, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success", "selected_model": request.model_name}
 
-@router.get("/predictions/{battery_id}")
+@router.get("/predictions/{battery_id}", response_model=None)
 def get_battery_predictions(battery_id: str, db: Session = Depends(get_db)):
     """ Returns history of predictions for a specific battery """
     predictions = db.query(domain.BatteryPrediction).filter(domain.BatteryPrediction.battery_id == battery_id).order_by(domain.BatteryPrediction.cycle.desc()).limit(100).all()
     return predictions
 
-@router.get("/analytics/health-distribution")
+@router.get("/analytics/health-distribution", response_model=None)
 def get_health_distribution(db: Session = Depends(get_db)):
     """ Groups batteries into health buckets based on their latest prediction """
     latest_preds = get_latest_predictions_query(db).all()
@@ -550,7 +550,7 @@ def get_health_distribution(db: Session = Depends(get_db)):
         else: bins["81-100"] += 1
     return bins
 
-@router.get("/analytics/failure-risk")
+@router.get("/analytics/failure-risk", response_model=None)
 def get_failure_risk(db: Session = Depends(get_db)):
     """ Computes aggregate failure risk using the latest prediction per battery """
     latest_preds = get_latest_predictions_query(db).all()
@@ -560,7 +560,7 @@ def get_failure_risk(db: Session = Depends(get_db)):
     avg_risk = sum(p.failure_probability for p in latest_preds) / total
     return {"average_risk": round(avg_risk, 2), "high_risk_count": high_risk}
 
-@router.get("/ml/progress")
+@router.get("/ml/progress", response_model=None)
 def get_ml_recompute_progress(db: Session = Depends(get_db)):
     """ Returns current ML recompute progress metrics """
     return get_ml_progress(db)
@@ -593,11 +593,11 @@ def recompute_ml_internal(db: Session, batch_size: int = 50):
                 # Flow A: Use latest existing feature
                 features = {
                     "cycle_count": latest_feat.cycle_count,
-                    "average_voltage": latest_feat.average_voltage,
+                    "avg_voltage": latest_feat.avg_voltage,
                     "max_voltage": latest_feat.max_voltage,
                     "min_voltage": latest_feat.min_voltage,
-                    "average_current": latest_feat.average_current,
-                    "average_temperature": latest_feat.average_temperature,
+                    "avg_current": latest_feat.avg_current,
+                    "avg_temperature": latest_feat.avg_temperature,
                     "capacity_fade": latest_feat.capacity_fade,
                     "internal_resistance": latest_feat.internal_resistance,
                     "charge_time": latest_feat.charge_time,
@@ -605,7 +605,8 @@ def recompute_ml_internal(db: Session, batch_size: int = 50):
                     "energy_efficiency": latest_feat.energy_efficiency,
                     "voltage_variance": latest_feat.voltage_variance,
                     "temperature_variance": latest_feat.temperature_variance,
-                    "current_variance": latest_feat.current_variance
+                    "current_variance": latest_feat.current_variance,
+                    "capacity_ah": latest_feat.capacity_ah
                 }
                 results = model_engine.predict(features, selected_model)
                 
@@ -647,11 +648,26 @@ def recompute_ml_internal(db: Session, batch_size: int = 50):
                 features = extract_features(cycle_dict, latest_legacy_cycle.cycle)
                 results = model_engine.predict(features, selected_model)
                 
-                # Save Feature
+                # Save Feature (Manual mapping to avoid 'capacity' mismatch)
                 bat_feat = domain.BatteryFeature(
                     battery_id=bat_id,
                     cycle=latest_legacy_cycle.cycle,
-                    **features
+                    cycle_count=features["cycle_count"],
+                    avg_voltage=features["avg_voltage"],
+                    max_voltage=features["max_voltage"],
+                    min_voltage=features["min_voltage"],
+                    avg_current=features["avg_current"],
+                    avg_temperature=features["avg_temperature"],
+                    capacity_fade=features["capacity_fade"],
+                    internal_resistance=features["internal_resistance"],
+                    charge_time=features["charge_time"],
+                    discharge_time=features["discharge_time"],
+                    energy_efficiency=features["energy_efficiency"],
+                    voltage_variance=features["voltage_variance"],
+                    temperature_variance=features["temperature_variance"],
+                    current_variance=features["current_variance"],
+                    capacity_ah=features["capacity_ah"],
+                    energy_throughput=features["energy_throughput"]
                 )
                 db.add(bat_feat)
 
@@ -696,6 +712,10 @@ def recompute_ml_internal(db: Session, batch_size: int = 50):
                     db.add(summary)
             
             processed_count += 1
+            progress = get_ml_progress(db)
+            print(f"Processing battery: {bat_id}")
+            print(f"Remaining batteries: {progress['batteries_remaining']}")
+            
             db.commit() # Commit natively per batched object structurally resolving timeouts
             
         progress = get_ml_progress(db)
@@ -712,7 +732,7 @@ def recompute_ml_internal(db: Session, batch_size: int = 50):
         db.rollback()
         raise e
 
-@router.post("/recompute-ml")
+@router.post("/recompute-ml", response_model=None)
 def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
     """ Synchronous endpoint to process a single batch of batteries """
     try:
@@ -733,7 +753,7 @@ def recompute_all_background(batch_size: int = 50):
     finally:
         db.close()
 
-@router.post("/recompute-ml/all")
+@router.post("/recompute-ml/all", response_model=None)
 def recompute_all_ml(batch_size: int = 50):
     """ 
     Starts a background thread to process all pending batteries.

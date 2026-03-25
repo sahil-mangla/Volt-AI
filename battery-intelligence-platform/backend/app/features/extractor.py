@@ -51,11 +51,11 @@ def extract_features(cycle_data: dict, current_cycle_count: int = 1) -> dict:
 
     return {
         "cycle_count": current_cycle_count,
-        "average_voltage": avg_voltage,
+        "avg_voltage": avg_voltage,
         "max_voltage": max_voltage,
         "min_voltage": min_voltage,
-        "average_current": avg_current,
-        "average_temperature": avg_temp,
+        "avg_current": avg_current,
+        "avg_temperature": avg_temp,
         "capacity_fade": capacity_fade,
         "internal_resistance": ir,
         "charge_time": charge_time,
@@ -64,7 +64,6 @@ def extract_features(cycle_data: dict, current_cycle_count: int = 1) -> dict:
         "voltage_variance": v_var,
         "temperature_variance": t_var,
         "current_variance": c_var,
-        # Keep capacity calculated for reference in backwards compatibility
-        "capacity": capacity,
+        "capacity_ah": capacity,
         "energy_throughput": capacity # using capacity as proxy for throughput (Amp-hours)
     }
