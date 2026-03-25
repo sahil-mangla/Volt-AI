@@ -97,6 +97,8 @@ class BatteryFeature(Base):
     voltage_variance = Column(Float)
     temperature_variance = Column(Float)
     current_variance = Column(Float)
+    capacity = Column(Float)
+    energy_throughput = Column(Float)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class BatteryPrediction(Base):

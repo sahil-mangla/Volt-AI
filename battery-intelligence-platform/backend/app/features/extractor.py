@@ -65,5 +65,6 @@ def extract_features(cycle_data: dict, current_cycle_count: int = 1) -> dict:
         "temperature_variance": t_var,
         "current_variance": c_var,
         # Keep capacity calculated for reference in backwards compatibility
-        "capacity": capacity 
+        "capacity": capacity,
+        "energy_throughput": capacity # using capacity as proxy for throughput (Amp-hours)
     }

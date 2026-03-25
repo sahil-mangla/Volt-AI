@@ -7,7 +7,8 @@ import io
 
 from app.services.blob_service import blob_service
 
-from app.database.session import get_db
+import threading
+from app.database.session import get_db, SessionLocal
 from app.models import domain
 from app.schemas.payloads import PredictionResponse, CycleData, BatterySummary, AlertResponse, MaintenanceRequest, MaintenanceResponse, ModelSelectRequest
 from app.features.extractor import extract_features
@@ -565,10 +566,8 @@ def get_ml_recompute_progress(db: Session = Depends(get_db)):
     return get_ml_progress(db)
 
 @router.post("/recompute-ml")
-def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
-    """ 
-    Synthesizes and dynamically routes legacy records into the new ML processing layer securely in batches 
-    """
+def recompute_ml_internal(db: Session, batch_size: int = 50):
+    """ Internal recompute logic reusable across endpoints and background threads """
     try:
         from sqlalchemy import func
         # Find all battery_ids that have no BatteryPrediction records yet
@@ -576,7 +575,7 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
         legacy_batteries = db.query(domain.Battery.id).filter(domain.Battery.id.notin_(subquery)).limit(batch_size).all()
         
         if not legacy_batteries:
-            return {"status": "success", "message": "No legacy batteries pending recomputation.", "batteries_processed": 0}
+            return {"status": "success", "message": "No legacy batteries pending recomputation.", "batteries_processed_this_batch": 0, "remaining": 0}
             
         setting = db.query(domain.ModelSetting).first()
         selected_model = setting.selected_model if setting else "physics_model"
@@ -711,27 +710,40 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
     except Exception as e:
         log_error("Recompute ML Pipe", str(e))
         db.rollback()
+        raise e
+
+@router.post("/recompute-ml")
+def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
+    """ Synchronous endpoint to process a single batch of batteries """
+    try:
+        return recompute_ml_internal(db, batch_size)
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def recompute_all_background(batch_size: int = 50):
+    """ Background thread runner that processes all pending batteries """
+    db = SessionLocal()
+    try:
+        while True:
+            result = recompute_ml_internal(db, batch_size)
+            if result.get("remaining", 0) == 0 or result.get("batteries_processed_this_batch", 0) == 0:
+                break
+    except Exception as e:
+        log_error("Background Recompute", str(e))
+    finally:
+        db.close()
+
 @router.post("/recompute-ml/all")
-def recompute_all_ml(batch_size: int = 50, db: Session = Depends(get_db)):
+def recompute_all_ml(batch_size: int = 50):
     """ 
-    Internal loop that processes all legacy batteries in batches until completion.
-    Returns a final summary when the entire fleet has been recomputed.
+    Starts a background thread to process all pending batteries.
+    Returns immediately to avoid HTTP timeouts.
     """
-    total_processed = 0
-    while True:
-        result = recompute_ml(batch_size=batch_size, db=db)
-        batch_count = result.get("batteries_processed_this_batch", 0)
-        total_processed += batch_count
-        
-        if batch_count == 0:
-            break
-            
-    progress = get_ml_progress(db)
+    thread = threading.Thread(target=recompute_all_background, kwargs={"batch_size": batch_size})
+    thread.daemon = True
+    thread.start()
+    
     return {
         "status": "success",
-        "message": f"Full fleet recompute complete. Processed {total_processed} batteries.",
-        "total_processed": total_processed,
-        "final_progress": progress
+        "message": "Full fleet ML recompute started in background. Monitor progress via /api/ml/progress"
     }
