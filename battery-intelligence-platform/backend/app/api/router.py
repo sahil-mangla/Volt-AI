@@ -524,6 +524,37 @@ def get_debug_counts(db: Session = Depends(get_db)):
         "alert_records": alert_records
     }
 
+@router.get("/debug/latest-count")
+def get_debug_latest_count(db: Session = Depends(get_db)):
+    """ Verifies that the latest-prediction subquery returns exactly one row per battery """
+    from sqlalchemy import func, distinct
+
+    # Same subquery used in all analytics endpoints
+    latest_id_subq = (
+        db.query(
+            domain.BatteryPrediction.battery_id,
+            func.max(domain.BatteryPrediction.id).label("latest_id")
+        )
+        .group_by(domain.BatteryPrediction.battery_id)
+        .subquery()
+    )
+
+    latest_preds = (
+        db.query(domain.BatteryPrediction)
+        .join(
+            latest_id_subq,
+            domain.BatteryPrediction.id == latest_id_subq.c.latest_id
+        )
+        .all()
+    )
+
+    unique_ids = len(set(p.battery_id for p in latest_preds))
+
+    return {
+        "latest_prediction_rows": len(latest_preds),
+        "unique_battery_ids": unique_ids
+    }
+
 @router.get("/models")
 def get_models():
     """ Returns a list of available ML models """
