@@ -751,10 +751,11 @@ def recompute_ml(batch_size: int = 50, db: Session = Depends(get_db)):
 
 def recompute_all_background(batch_size: int = 50):
     """ Background thread runner that processes all pending batteries with error resilience """
-    db = SessionLocal()
     try:
         print("ML recompute background worker started.")
         while True:
+            # Create a fresh session per batch to prevent memory leaks and stale data
+            db = SessionLocal()
             try:
                 result = recompute_ml_internal(db, batch_size)
                 remaining = result.get("remaining", 0)
@@ -770,15 +771,13 @@ def recompute_all_background(batch_size: int = 50):
                 time.sleep(1)
             except Exception as batch_error:
                 print(f"Error processing ML batch: {batch_error}")
-                # Log error but continue to next attempt/thread rotation
                 log_error("Background Recompute Batch", str(batch_error))
-                # Optional: add a small sleep if desired to prevent tight loop on repeat failures
-                continue
+                time.sleep(5) # Wait longer on error to prevent tight failing loops
+            finally:
+                db.close()
     except Exception as e:
         log_error("Background Recompute Fatal", str(e))
         print(f"Background recompute worker encountered fatal error: {e}")
-    finally:
-        db.close()
 
 @router.post("/recompute-ml/all", response_model=None)
 def recompute_all_ml(batch_size: int = 50):
