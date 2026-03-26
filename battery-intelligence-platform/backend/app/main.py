@@ -25,9 +25,8 @@ def health():
 
 @app.on_event("startup")
 def startup_event():
-    # Only initialize DB schema — no CSV processing, no ML, no background tasks
-    Base.metadata.create_all(bind=engine)
-    print("VoltAI API started successfully.")
+    # Zero startup processing — no create_all here to prevent Azure timeout
+    print("VoltAI API started (Status: LIGHT). Tables must be created via /api/init-db")
 
 # Mount API
 app.include_router(router, prefix="/api", tags=["API Endpoints"])

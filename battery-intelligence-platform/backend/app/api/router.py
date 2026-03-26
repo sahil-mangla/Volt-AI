@@ -19,6 +19,20 @@ from app.api.analytics import get_latest_predictions_query, get_ml_progress
 
 router = APIRouter()
 
+@router.get("/init-db", response_model=None)
+def initialize_database_schema():
+    """ 
+    Manually triggers SQLAlchemy Base.metadata.create_all.
+    Use this once after deployment to ensure tables exist.
+    """
+    try:
+        from app.database.session import engine, Base
+        from app.models import domain
+        Base.metadata.create_all(bind=engine)
+        return {"status": "success", "message": "Database tables created/verified successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database initialization failed: {e}")
+
 @router.post("/predict", response_model=None)
 def predict_battery_health(data: CycleData, db: Session = Depends(get_db)):
     """
