@@ -133,7 +133,7 @@ class DataLoader:
         return df
         
     @staticmethod
-    def load_from_db(connection_string: str) -> Optional[pd.DataFrame]:
+    def load_from_db(connection_string: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
         Loads battery cycle data from the database.
         """
@@ -142,7 +142,10 @@ class DataLoader:
             engine = create_engine(connection_string)
             
             query = "SELECT * FROM battery_cycles ORDER BY battery_id, cycle"
-            logger.info("Fetching data from database...")
+            if limit:
+                query += f" LIMIT {limit}"
+                
+            logger.info(f"Fetching data from database (Limit: {limit})...")
             
             df = pd.read_sql(query, engine)
             

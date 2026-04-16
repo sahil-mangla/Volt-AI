@@ -24,6 +24,7 @@ function Dashboard() {
   const [selectedBattery, setSelectedBattery] = useState(null);
   const [historyData, setHistoryData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [notification, setNotification] = useState({ visible: false, message: '', type: '' });
 
@@ -53,27 +54,25 @@ function Dashboard() {
   }, [activeTab]);
 
   // Fetch Fleet Summary & Apply Settings
-  useEffect(() => {
+  const fetchFleetData = () => {
+    setLoading(true);
+    setError(null);
+    
     // Determine model query param based on settings
     const baseUrl = import.meta.env.VITE_API_URL || '/api';
     const modelParam = settings.model.includes('LSTM') ? 'lstm' : 'linear';
     
     fetch(`${baseUrl}/batteries?model_type=${modelParam}`)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`Server responded with ${res.status}: ${res.statusText}`);
+        return res.json();
+      })
       .then(data => {
         // Apply dynamic thresholds
         const processedData = data.map(b => {
           let status = 'HEALTHY';
-          // Keep existing status logic or backend logic
           if (b.health < settings.criticalThreshold) status = 'CRITICAL';
           else if (b.health < settings.warningThreshold) status = 'WARNING';
-          
-          // If maintenance, keep it (unless we want to overwrite it with health status)
-          // For now, let's respect the local override if we had one, but effectively we are overwriting 
-          // fleetData every time. 
-          // Ideally we should merge with existing state to preserve "MAINTENANCE" status if it's local only.
-          // But for this prototype, simple refresh is fine.
-          
           return { ...b, status };
         });
 
@@ -83,7 +82,15 @@ function Dashboard() {
         }
         setLoading(false);
       })
-      .catch(err => console.error("Failed to fetch fleet data:", err));
+      .catch(err => {
+        console.error("Failed to fetch fleet data:", err);
+        setError(err.message || "Failed to connect to VoltAI API. Please check your connection or try again later.");
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchFleetData();
   }, [settings]); // Re-run when settings change
 
   // Fetch History for Selected Battery
@@ -183,6 +190,21 @@ function Dashboard() {
             <StatCard label="Avg Fleet Health" value={`${getAvgHealth()}%`} status={getAvgHealth() < settings.warningThreshold ? 'warning' : 'normal'} />
             <StatCard label="Predicted Failures" value={getCriticalCount()} status={getCriticalCount() > 0 ? 'critical' : 'normal'} />
           </div>
+          
+          {error && (
+            <div className="mt-6 bg-destructive/15 border border-destructive/30 rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                <p className="text-sm font-medium">API Error: {error}</p>
+              </div>
+              <button 
+                onClick={fetchFleetData}
+                className="text-xs bg-destructive text-destructive-foreground px-3 py-1.5 rounded-lg hover:bg-destructive/90 transition-colors"
+              >
+                Retry Connection
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Dynamic Content */}

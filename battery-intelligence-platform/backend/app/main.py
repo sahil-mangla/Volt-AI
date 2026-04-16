@@ -41,86 +41,89 @@ BATTERY_STATS = {}
 @app.on_event("startup")
 async def load_data():
     """
-    Load NASA dataset on startup to simulate fleet data.
+    Load pre-computed battery summary from database, or fallback to sample data.
     """
     global NASA_DATA, BATTERY_STATS
     try:
-    # Check if running on Vercel (or other limited env)
         is_vercel = os.environ.get('VERCEL') == '1'
         db_url = os.environ.get('DATABASE_URL')
         
+        # Priority 1: Load pre-computed predictions (FASTEST)
         if db_url:
-            logger.info("DATABASE_URL found. Attempting to load from Database...")
-            NASA_DATA = DataLoader.load_from_db(db_url)
-            
-        # Fallback if DB load failed or not configured
-        if NASA_DATA is None:
-            if is_vercel:
-                base_path = os.path.join(os.path.dirname(__file__), '../../data/sample')
-                limit = 10
-                logger.info("Running on Vercel (No DB): Using sample dataset payload.")
-            else:
-                base_path = os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
-                limit = 1000
+            try:
+                from sqlalchemy import create_engine, text
+                engine = create_engine(db_url)
+                logger.info("Attempting to load pre-computed predictions...")
                 
-            logger.info(f"Loading NASA Metadata from: {base_path} (Limit: {limit})")
+                with engine.connect() as conn:
+                    # Check if table exists and has data
+                    result = conn.execute(text("SELECT battery_id, rul_lstm, health_score, last_cycle FROM battery_predictions"))
+                    rows = result.fetchall()
+                    
+                    if rows:
+                        new_stats = {}
+                        for row in rows:
+                            bid, rul_lstm, health, last_cycle = row
+                            
+                            status = "HEALTHY"
+                            if health < 70: status = "CRITICAL"
+                            elif health < 80: status = "WARNING"
+                            
+                            new_stats[bid] = {
+                                "id": bid,
+                                "health": round(health, 1),
+                                "rul": rul_lstm,
+                                "rul_linear": rul_lstm, # Fallback to LSTM if linear not pre-computed
+                                "rul_lstm": rul_lstm,
+                                "status": status,
+                                "last_cycle": last_cycle,
+                                "history": [] # Will be loaded lazily on request
+                            }
+                        
+                        BATTERY_STATS = new_stats
+                        logger.info(f"Loaded {len(BATTERY_STATS)} batteries from pre-computed predictions.")
+                        return # Success! No need for heavy loading.
+            except Exception as e:
+                logger.warning(f"Failed to load pre-computed predictions: {e}. Falling back to cycle calculations.")
+
+        # Priority 2: Fallback to computing from cycles
+        if db_url:
+            fetch_limit = 5000 if is_vercel else 50000
+            NASA_DATA = DataLoader.load_from_db(db_url, limit=fetch_limit)
             
-            # Load up to limit files
+        if NASA_DATA is None or NASA_DATA.empty:
+            base_path = os.path.join(os.path.dirname(__file__), '../../data/sample') if is_vercel else os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
+            limit = 5 if is_vercel else 1000
             NASA_DATA = DataLoader.load_nasa_dataset(base_path, max_files=limit)
         
         if NASA_DATA is not None and not NASA_DATA.empty:
-            logger.info(f"Loaded {len(NASA_DATA)} rows of cycle data.")
-            
-            # Pre-compute features for fast API response
-            logger.info("Pre-computing fleet statistics...")
             df_features = FeatureEngineer.compute_cycle_features(NASA_DATA)
             
-            # Load pre-computed LSTM predictions from database
-            logger.info("Loading pre-computed LSTM predictions from database...")
-            lstm_ruls = {}
-            try:
-                from sqlalchemy import create_engine
-                engine = create_engine(db_url)
-                with engine.connect() as conn:
-                    from sqlalchemy import text
-                    result = conn.execute(text("SELECT battery_id, rul_lstm FROM battery_predictions"))
-                    lstm_ruls = {row[0]: row[1] for row in result}
-                logger.info(f"Loaded LSTM predictions for {len(lstm_ruls)} batteries")
-            except Exception as e:
-                logger.warning(f"Could not load LSTM predictions from DB: {e}. Using linear regression only.")
-            
-            # Group by battery
+            new_stats = {}
             for bid in df_features['battery_id'].unique():
                 batt_df = df_features[df_features['battery_id'] == bid].sort_values('cycle')
-                
-                # Get latest status
                 latest = batt_df.iloc[-1]
                 
-                # RULs
-                rul_linear = int(latest.get('rul', 0))
-                rul_lstm = int(lstm_ruls.get(bid, rul_linear)) # Use pre-computed or fallback to linear
-                
-                # Determine status based on LINEAR (standard) or allow override?
-                # Let's stick to Health Score for status to be consistent.
                 status = "HEALTHY"
                 if latest['health_score'] < 70: status = "CRITICAL"
                 elif latest['health_score'] < 80: status = "WARNING"
                 
-                BATTERY_STATS[bid] = {
+                new_stats[bid] = {
                     "id": bid,
                     "health": round(latest['health_score'], 1),
-                    "rul": rul_linear, # Default/Legacy
-                    "rul_linear": rul_linear,
-                    "rul_lstm": rul_lstm,
+                    "rul": int(latest.get('rul', 0)),
+                    "rul_linear": int(latest.get('rul', 0)),
+                    "rul_lstm": int(latest.get('rul', 0)),
                     "status": status,
                     "history": batt_df.to_dict(orient='records')
                 }
-            logger.info(f"Fleet initialization complete for: {list(BATTERY_STATS.keys())}")
-        else:
-            logger.warning("No data loaded. Check data path.")
+            
+            BATTERY_STATS = new_stats
+            logger.info("Fleet initialization complete via cycle computation.")
             
     except Exception as e:
-        logger.error(f"Startup Data Load Failed: {e}")
+        logger.error(f"Startup Data Load Failed: {str(e)}")
+        BATTERY_STATS = {}
 
 # Initialize Model
 # In a real scenario, we might load a pre-trained pickle here
@@ -158,6 +161,30 @@ async def get_battery_details(battery_id: str, model_type: str = 'linear'):
     
     data = BATTERY_STATS[battery_id].copy()
     
+    # Lazy load history from DB if missing
+    if not data.get("history") or len(data["history"]) == 0:
+        db_url = os.environ.get('DATABASE_URL')
+        if db_url:
+            try:
+                logger.info(f"Lazy-loading history for battery {battery_id}...")
+                # Fetch recent cycles for this battery
+                from sqlalchemy import create_engine
+                engine = create_engine(db_url)
+                
+                # Use DataLoader to fetch and compute features for this specific battery
+                # We fetch a larger limit for the specific battery to get a good chart
+                query = f"SELECT * FROM battery_cycles WHERE battery_id = '{battery_id}' ORDER BY cycle DESC LIMIT 50"
+                df_raw = pd.read_sql(query, engine)
+                
+                if not df_raw.empty:
+                    df_features = FeatureEngineer.compute_cycle_features(df_raw)
+                    data["history"] = df_features.sort_values('cycle').to_dict(orient='records')
+                    # Update cache
+                    BATTERY_STATS[battery_id]["history"] = data["history"]
+                    logger.info(f"Successfully loaded {len(data['history'])} cycles for {battery_id}")
+            except Exception as e:
+                logger.error(f"Failed to lazy-load history: {e}")
+
     # Update the top-level RUL to match requested model
     data["rul"] = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
     
