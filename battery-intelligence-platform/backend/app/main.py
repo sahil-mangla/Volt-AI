@@ -16,13 +16,15 @@ from ml_engine.features import FeatureEngineer
 from .schemas import CycleData, PredictionResponse
 
 # Configure logging
+APP_VERSION = "1.1.0-RUL-FIX-V1"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info(f"🚀 VOLTAI BACKEND STARTING - VERSION: {APP_VERSION}")
 
 app = FastAPI(
     title="VoltAI Battery Intelligence API",
     description="Predictive maintenance and health monitoring for EV fleets.",
-    version="1.0.0"
+    version=APP_VERSION
 )
 
 # CORS (Allow frontend to connect)
@@ -141,6 +143,8 @@ async def get_batteries(model_type: str = 'linear'):
     
     # Return summary list
     summary = []
+    logger.info(f"Serving {len(BATTERY_STATS)} batteries with model {model_type}")
+    
     for bid, data in BATTERY_STATS.items():
         # Select RUL based on model_type
         start_rul = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
@@ -150,6 +154,9 @@ async def get_batteries(model_type: str = 'linear'):
         last_cycle = data.get("last_cycle", 0)
         display_rul = max(0, start_rul - (last_cycle % 5))
         
+        if bid.startswith("BATT_056"): # Debugging the specific batteries in screenshot
+            logger.info(f"DEBUG: Battery {bid} - start_rul: {start_rul}, cycle: {last_cycle}, display: {display_rul}")
+            
         summary.append({
             "id": bid,
             "health": data["health"],
