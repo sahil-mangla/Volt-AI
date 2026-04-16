@@ -134,44 +134,56 @@ class FeatureEngineer:
         Estimates RUL for a single battery history dataframe.
         """
         rul_series = []
-        # Simple heuristic: If SOH drops 0.1% per cycle, and we are at 90%, 
-        # we have (90-70)/0.1 = 200 cycles left.
+        # Nominal lifespan for these batteries is typically 500-800 cycles
+        # We use 800 as a conservative upper bound for "Healthy" state.
+        NOMINAL_MAX_LIFE = 800
         
         for i in range(len(df_battery)):
             current_cycle = df_battery['cycle'].iloc[i]
-            current_soh = df_battery['health_score'].iloc[i]
+            current_health = df_battery['health_score'].iloc[i]
             
+            # 1. Base estimation: If we don't have enough data for a trend, 
+            # use a nominal countdown.
             if i < 10:
-                rul_series.append(1000) # Placeholder for start
+                rul_series.append(max(0, NOMINAL_MAX_LIFE - int(current_cycle)))
                 continue
                 
-            # Calulcate degradation rate over last 20 cycles (increased from 10 to smooth out noise)
+            # 2. Advanced Trend Analysis (Slope-based)
+            # Find degradation rate over last 20 cycles
             recent_window = 20
-            if i < recent_window:
-                rul_series.append(1000)
-                continue
-
             recent_df = df_battery.iloc[max(0, i-recent_window):i+1]
+            
             try:
-                # fit linear regression: soh = m * cycle + c
+                # fit linear regression: health = m * cycle + c
                 coeffs = np.polyfit(recent_df['cycle'], recent_df['health_score'], 1)
                 slope = coeffs[0]
                 
-                # If slope is negative, standard calc
-                if slope < -0.001: # Significant degradation
-                    cycles_remaining = (current_soh - 70) / abs(slope)
-                    rul_series.append(int(min(2000, max(0, cycles_remaining))))
+                # Significant degradation detected (negative slope)
+                if slope < -0.005: 
+                    cycles_remaining = (current_health - 70) / abs(slope)
+                    rul_val = int(min(NOMINAL_MAX_LIFE, max(0, cycles_remaining)))
                 
-                # If slope is positive/flat BUT battery is already dying (SOH < 80%), 
-                # do NOT say 1000. Panic and say "Unknown/Low" or assume worst case.
-                elif current_soh < 80:
-                    # Fallback: Assume average degradation rate of 0.5% per cycle if unclear
-                    cycles_remaining = (current_soh - 70) / 0.5
-                    rul_series.append(int(max(0, cycles_remaining)))
+                # If slope is positive or flat but health is declining
+                elif current_health < 90:
+                    # Fallback to a pessimistic degradation rate (0.2% per cycle)
+                    cycles_remaining = (current_health - 70) / 0.2
+                    rul_val = int(min(NOMINAL_MAX_LIFE, max(0, cycles_remaining)))
                 
                 else:
-                    rul_series.append(1000) # Not degrading significantly yet
-            except:
-                rul_series.append(1000)
+                    # Healthy battery: use nominal life countdown
+                    rul_val = max(0, NOMINAL_MAX_LIFE - int(current_cycle))
+                
+                # Smooth the output to avoid sudden jumps
+                if len(rul_series) > 0:
+                    last_val = rul_series[-1]
+                    # Don't let RUL increase unless it's a minor noise correction
+                    if rul_val > last_val + 5:
+                        rul_val = last_val - 1
+                
+                rul_series.append(max(0, rul_val))
+                
+            except Exception as e:
+                # Absolute fallback
+                rul_series.append(max(0, NOMINAL_MAX_LIFE - int(current_cycle)))
                 
         return pd.Series(rul_series, index=df_battery.index)
