@@ -40,12 +40,17 @@ app.add_middleware(
 NASA_DATA = None
 BATTERY_STATS = {}
 
-@app.on_event("startup")
-async def load_data():
+async def ensure_data_loaded():
     """
-    Load pre-computed battery summary from database, or fallback to sample data.
+    Ensures BATTERY_STATS is populated. Uses lazy loading for serverless environments.
     """
     global NASA_DATA, BATTERY_STATS
+    
+    # If already loaded, return
+    if BATTERY_STATS:
+        return
+
+    logger.info("📡 Lazy-loading fleet data...")
     try:
         is_vercel = os.environ.get('VERCEL') == '1'
         db_url = os.environ.get('DATABASE_URL')
@@ -55,10 +60,8 @@ async def load_data():
             try:
                 from sqlalchemy import create_engine, text
                 engine = create_engine(db_url)
-                logger.info("Attempting to load pre-computed predictions...")
                 
                 with engine.connect() as conn:
-                    # Check if table exists and has data
                     result = conn.execute(text("SELECT battery_id, rul_lstm, health_score, last_cycle FROM battery_predictions"))
                     rows = result.fetchall()
                     
@@ -75,27 +78,27 @@ async def load_data():
                                 "id": bid,
                                 "health": round(health, 1),
                                 "rul": rul_lstm,
-                                "rul_linear": rul_lstm, # Fallback to LSTM if linear not pre-computed
+                                "rul_linear": rul_lstm,
                                 "rul_lstm": rul_lstm,
                                 "status": status,
                                 "last_cycle": last_cycle,
-                                "history": [] # Will be loaded lazily on request
+                                "history": [] 
                             }
                         
                         BATTERY_STATS = new_stats
-                        logger.info(f"Loaded {len(BATTERY_STATS)} batteries from pre-computed predictions.")
-                        return # Success! No need for heavy loading.
+                        logger.info(f"✅ Loaded {len(BATTERY_STATS)} batteries from pre-computed predictions.")
+                        return 
             except Exception as e:
                 logger.warning(f"Failed to load pre-computed predictions: {e}. Falling back to cycle calculations.")
 
         # Priority 2: Fallback to computing from cycles
         if db_url:
-            fetch_limit = 5000 if is_vercel else 50000
+            fetch_limit = 10000 if is_vercel else 50000
             NASA_DATA = DataLoader.load_from_db(db_url, limit=fetch_limit)
             
         if NASA_DATA is None or NASA_DATA.empty:
             base_path = os.path.join(os.path.dirname(__file__), '../../data/sample') if is_vercel else os.path.join(os.path.dirname(__file__), '../../data/raw/cleaned_dataset')
-            limit = 5 if is_vercel else 1000
+            limit = 10 if is_vercel else 1000
             NASA_DATA = DataLoader.load_nasa_dataset(base_path, max_files=limit)
         
         if NASA_DATA is not None and not NASA_DATA.empty:
@@ -117,18 +120,23 @@ async def load_data():
                     "rul_linear": int(latest.get('rul', 0)),
                     "rul_lstm": int(latest.get('rul', 0)),
                     "status": status,
+                    "last_cycle": int(latest['cycle']),
                     "history": batt_df.to_dict(orient='records')
                 }
             
             BATTERY_STATS = new_stats
-            logger.info("Fleet initialization complete via cycle computation.")
+            logger.info("✅ Fleet initialization complete via cycle computation.")
             
     except Exception as e:
-        logger.error(f"Startup Data Load Failed: {str(e)}")
-        BATTERY_STATS = {}
+        logger.error(f"❌ Lazy Load Failed: {str(e)}")
+        if not BATTERY_STATS: BATTERY_STATS = {}
+
+@app.on_event("startup")
+async def startup_event():
+    # Still attempt loading on startup for non-serverless environments
+    await ensure_data_loaded()
 
 # Initialize Model
-# In a real scenario, we might load a pre-trained pickle here
 predictor = BatteryPredictor()
 
 # Router for API endpoints
@@ -138,6 +146,7 @@ router = APIRouter()
 @router.get("/batteries")
 async def get_batteries(model_type: str = 'linear'):
     """Returns list of all monitored batteries and their current status."""
+    await ensure_data_loaded()
     if not BATTERY_STATS:
         return []
     
@@ -168,6 +177,7 @@ async def get_batteries(model_type: str = 'linear'):
 @router.get("/batteries/{battery_id}")
 async def get_battery_details(battery_id: str, model_type: str = 'linear'):
     """Returns detailed history for a specific battery."""
+    await ensure_data_loaded()
     if battery_id not in BATTERY_STATS:
         raise HTTPException(status_code=404, detail="Battery not found")
     
