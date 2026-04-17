@@ -16,7 +16,7 @@ from ml_engine.features import FeatureEngineer
 from .schemas import CycleData, PredictionResponse
 
 # Configure logging
-APP_VERSION = "1.1.0-RUL-FIX-V1"
+APP_VERSION = "1.2.0-FINAL-FIX"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.info(f"🚀 VOLTAI BACKEND STARTING - VERSION: {APP_VERSION}")
