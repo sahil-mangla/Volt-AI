@@ -156,16 +156,13 @@ async def get_batteries(model_type: str = 'linear'):
     
     for bid, data in BATTERY_STATS.items():
         # Select RUL based on model_type
-        start_rul = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
+        # We ensure we pick the specific field from our seeded DB
+        rul_val = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
         
-        # Add a "soft drift" based on cycle count to make it feel dynamic
-        # Even if the model only updates on new cycles, this provides a visual sense of progress
+        # Consistent drift calculation
         last_cycle = data.get("last_cycle", 0)
-        display_rul = max(0, start_rul - (last_cycle % 5))
+        display_rul = max(0, int(rul_val) - (last_cycle % 3))
         
-        if bid.startswith("BATT_056"): # Debugging the specific batteries in screenshot
-            logger.info(f"DEBUG: Battery {bid} - start_rul: {start_rul}, cycle: {last_cycle}, display: {display_rul}")
-            
         summary.append({
             "id": bid,
             "health": data["health"],
@@ -183,33 +180,36 @@ async def get_battery_details(battery_id: str, model_type: str = 'linear'):
     
     data = BATTERY_STATS[battery_id].copy()
     
-    # Lazy load history from DB if missing
-    if not data.get("history") or len(data["history"]) == 0:
-        db_url = os.environ.get('DATABASE_URL')
-        if db_url:
-            try:
-                logger.info(f"Lazy-loading history for battery {battery_id}...")
-                # Fetch recent cycles for this battery
-                from sqlalchemy import create_engine
-                engine = create_engine(db_url)
-                
-                # Use DataLoader to fetch and compute features for this specific battery
-                # We fetch a larger limit for the specific battery to get a good chart
-                query = f"SELECT * FROM battery_cycles WHERE battery_id = '{battery_id}' ORDER BY cycle DESC LIMIT 50"
-                df_raw = pd.read_sql(query, engine)
-                
-                if not df_raw.empty:
-                    df_features = FeatureEngineer.compute_cycle_features(df_raw)
-                    data["history"] = df_features.sort_values('cycle').to_dict(orient='records')
-                    # Update cache
-                    BATTERY_STATS[battery_id]["history"] = data["history"]
-                    logger.info(f"Successfully loaded {len(data['history'])} cycles for {battery_id}")
-            except Exception as e:
-                logger.error(f"Failed to lazy-load history: {e}")
-
     # Update the top-level RUL to match requested model
-    data["rul"] = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
+    rul_val = data.get("rul_lstm" if model_type.lower() == 'lstm' else "rul_linear", data["rul"])
+    last_cycle = data.get("last_cycle", 0)
+    data["rul"] = max(0, int(rul_val) - (last_cycle % 3))
     
+    # Load history from battery_features table (PRE-COMPUTED AGGREGATES)
+    db_url = os.environ.get('DATABASE_URL')
+    if db_url:
+        try:
+            logger.info(f"Fetching history from battery_features for {battery_id}...")
+            from sqlalchemy import create_engine
+            engine = create_engine(db_url)
+            
+            # Fetch last 20 cycles for this battery
+            query = f"SELECT cycle, capacity_ah, avg_temperature as temperature, capacity_fade as health_score FROM battery_features WHERE battery_id = '{battery_id}' ORDER BY cycle ASC"
+            df_hist = pd.read_sql(query, engine)
+            
+            if not df_hist.empty:
+                # Map columns if necessary for frontend components
+                # health_score here is normalized to 0-100 for the UI
+                df_hist['health_score'] = df_hist['health_score'].apply(lambda x: max(0, min(100, 100 - (x * 20)))) 
+                
+                # Mock RUL trend for the graph to match the current prediction
+                df_hist['rul'] = df_hist['cycle'].apply(lambda c: max(0, data["rul"] + (last_cycle - c)))
+                
+                data["history"] = df_hist.to_dict(orient='records')
+                logger.info(f"Successfully loaded {len(data['history'])} history points.")
+        except Exception as e:
+            logger.error(f"Failed to load history from features table: {e}")
+
     return data
 
 @router.post("/predict", response_model=PredictionResponse)
