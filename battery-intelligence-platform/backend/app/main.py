@@ -194,7 +194,7 @@ async def get_battery_details(battery_id: str, model_type: str = 'linear'):
             engine = create_engine(db_url)
             
             # Fetch last 20 cycles for this battery
-            query = f"SELECT cycle, capacity_ah, avg_temperature as temperature, capacity_fade as health_score FROM battery_features WHERE battery_id = '{battery_id}' ORDER BY cycle ASC"
+            query = f"SELECT cycle, capacity_ah as capacity, avg_voltage as voltage_mean, avg_temperature as temperature_mean, capacity_fade as health_score FROM battery_features WHERE battery_id = '{battery_id}' ORDER BY cycle ASC"
             df_hist = pd.read_sql(query, engine)
             
             if not df_hist.empty:

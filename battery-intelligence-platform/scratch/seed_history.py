@@ -23,6 +23,13 @@ def seed_history():
         for bid, last_cycle, health in rows:
             print(f"  - Generating history for {bid} (up to cycle {last_cycle})")
             
+            # Ensure battery exists in 'batteries' table to satisfy FK
+            conn.execute(text("""
+                INSERT INTO batteries (id, capacity, model_type, status)
+                VALUES (:bid, 2.0, 'Lithium-Ion', 'Active')
+                ON CONFLICT (id) DO NOTHING
+            """), {"bid": bid})
+            
             # Create 15 historical cycles
             for i in range(1, 16):
                 cycle_num = max(1, last_cycle - (16 - i) * 5)
