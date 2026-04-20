@@ -62,13 +62,13 @@ async def ensure_data_loaded():
                 engine = create_engine(db_url)
                 
                 with engine.connect() as conn:
-                    result = conn.execute(text("SELECT battery_id, rul_lstm, health_score, last_cycle FROM battery_predictions"))
+                    result = conn.execute(text("SELECT battery_id, rul_lstm, rul_linear, health_score, last_cycle FROM battery_predictions"))
                     rows = result.fetchall()
                     
                     if rows:
                         new_stats = {}
                         for row in rows:
-                            bid, rul_lstm, health, last_cycle = row
+                            bid, rul_lstm, rul_linear, health, last_cycle = row
                             
                             status = "HEALTHY"
                             if health < 70: status = "CRITICAL"
@@ -78,7 +78,7 @@ async def ensure_data_loaded():
                                 "id": bid,
                                 "health": round(health, 1),
                                 "rul": rul_lstm,
-                                "rul_linear": rul_lstm,
+                                "rul_linear": rul_linear,
                                 "rul_lstm": rul_lstm,
                                 "status": status,
                                 "last_cycle": last_cycle,

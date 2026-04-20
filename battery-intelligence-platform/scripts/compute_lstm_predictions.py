@@ -69,10 +69,12 @@ def compute_and_store_predictions():
             latest = batt_df.iloc[-1]
             
             rul_lstm = int(lstm_predictions.get(battery_id, 0))
+            rul_linear = int(latest.get('rul', 0))
             
             predictions_data.append({
                 'battery_id': battery_id,
                 'rul_lstm': rul_lstm,
+                'rul_linear': rul_linear,
                 'health_score': float(latest['health_score']),
                 'last_cycle': int(latest['cycle'])
             })
@@ -87,8 +89,8 @@ def compute_and_store_predictions():
             # Insert new predictions
             for pred in predictions_data:
                 insert_sql = """
-                INSERT INTO battery_predictions (battery_id, rul_lstm, health_score, last_cycle)
-                VALUES (:battery_id, :rul_lstm, :health_score, :last_cycle)
+                INSERT INTO battery_predictions (battery_id, rul_lstm, rul_linear, health_score, last_cycle)
+                VALUES (:battery_id, :rul_lstm, :rul_linear, :health_score, :last_cycle)
                 """
                 conn.execute(text(insert_sql), pred)
             

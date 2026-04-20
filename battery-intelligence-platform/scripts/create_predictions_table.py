@@ -27,12 +27,16 @@ def create_predictions_table():
         engine = create_engine(database_url)
         
         with engine.connect() as conn:
+            # Drop old table to ensure schema update
+            conn.execute(text("DROP TABLE IF EXISTS battery_predictions CASCADE;"))
+
             # Create table
             create_table_sql = """
-            CREATE TABLE IF NOT EXISTS battery_predictions (
+            CREATE TABLE battery_predictions (
                 id SERIAL PRIMARY KEY,
                 battery_id VARCHAR(50) NOT NULL,
                 rul_lstm INTEGER NOT NULL,
+                rul_linear INTEGER NOT NULL,
                 health_score FLOAT NOT NULL,
                 last_cycle INTEGER NOT NULL,
                 computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
