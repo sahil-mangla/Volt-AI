@@ -134,56 +134,40 @@ class FeatureEngineer:
         Estimates RUL for a single battery history dataframe.
         """
         rul_series = []
-        # Nominal lifespan for these batteries is typically 500-800 cycles
-        # We use 800 as a conservative upper bound for "Healthy" state.
-        NOMINAL_MAX_LIFE = 800
+        NOMINAL_MAX_LIFE = 999
         
         for i in range(len(df_battery)):
             current_cycle = df_battery['cycle'].iloc[i]
             current_health = df_battery['health_score'].iloc[i]
             
-            # 1. Base estimation: If we don't have enough data for a trend, 
-            # use a nominal countdown.
             if i < 10:
-                rul_series.append(max(0, NOMINAL_MAX_LIFE - int(current_cycle)))
+                rul_series.append(NOMINAL_MAX_LIFE)
                 continue
                 
-            # 2. Advanced Trend Analysis (Slope-based)
-            # Find degradation rate over last 20 cycles
             recent_window = 20
             recent_df = df_battery.iloc[max(0, i-recent_window):i+1]
             
             try:
-                # fit linear regression: health = m * cycle + c
                 coeffs = np.polyfit(recent_df['cycle'], recent_df['health_score'], 1)
                 slope = coeffs[0]
                 
-                # Significant degradation detected (negative slope)
                 if slope < -0.005: 
                     cycles_remaining = (current_health - 70) / abs(slope)
-                    rul_val = int(min(NOMINAL_MAX_LIFE, max(0, cycles_remaining)))
-                
-                # If slope is positive or flat but health is declining
+                    rul_val = min(NOMINAL_MAX_LIFE, max(0, cycles_remaining))
                 elif current_health < 90:
-                    # Fallback to a pessimistic degradation rate (0.2% per cycle)
-                    cycles_remaining = (current_health - 70) / 0.2
-                    rul_val = int(min(NOMINAL_MAX_LIFE, max(0, cycles_remaining)))
-                
+                    cycles_remaining = (current_health - 70) / 0.1 
+                    rul_val = min(NOMINAL_MAX_LIFE, max(0, cycles_remaining))
                 else:
-                    # Healthy battery: use nominal life countdown
-                    rul_val = max(0, NOMINAL_MAX_LIFE - int(current_cycle))
+                    rul_val = NOMINAL_MAX_LIFE
                 
-                # Smooth the output to avoid sudden jumps
+                # Smooth the output to avoid sudden jumps (EMA smoothing for recovery and stability)
                 if len(rul_series) > 0:
                     last_val = rul_series[-1]
-                    # Don't let RUL increase unless it's a minor noise correction
-                    if rul_val > last_val + 5:
-                        rul_val = last_val - 1
+                    rul_val = 0.2 * rul_val + 0.8 * last_val
                 
-                rul_series.append(max(0, rul_val))
+                rul_series.append(max(0, int(rul_val)))
                 
             except Exception as e:
-                # Absolute fallback
-                rul_series.append(max(0, NOMINAL_MAX_LIFE - int(current_cycle)))
+                rul_series.append(NOMINAL_MAX_LIFE)
                 
         return pd.Series(rul_series, index=df_battery.index)
